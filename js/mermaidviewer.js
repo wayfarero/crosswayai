@@ -242,11 +242,11 @@ function createMermaidViewer(deps) {
             }
 
             if (requestPath === '/' || requestPath === '') {
-                requestPath = '/mermaid-viewer.html';
+                requestPath = '/html/mermaid-viewer.html';
             }
 
             const normalized = path.normalize(requestPath.replace(/^\/+/, ''));
-            const isViewerRequest = normalized === 'mermaid-viewer.html';
+            const isViewerRequest = normalized === path.join('html', 'mermaid-viewer.html');
             const baseRoot = isViewerRequest ? mermaidServerExtensionRoot : mermaidServerRoot;
 
             if (!baseRoot) {
@@ -307,9 +307,9 @@ function createMermaidViewer(deps) {
 
         const workspaceRoot = workspaceFolders[0].uri.fsPath;
         const extensionRoot = context && context.extensionPath ? context.extensionPath : path.resolve(__dirname, '..');
-        const viewerPath = path.join(extensionRoot, 'mermaid-viewer.html');
+        const viewerPath = path.join(extensionRoot, 'html', 'mermaid-viewer.html');
         if (!fs.existsSync(viewerPath)) {
-            vscode.window.showErrorMessage('CrossWayAI: mermaid-viewer.html not found in extension installation path.');
+            vscode.window.showErrorMessage('CrossWayAI: html/mermaid-viewer.html not found in extension installation path.');
             return;
         }
 
@@ -326,7 +326,7 @@ function createMermaidViewer(deps) {
 
         try {
             const port = await ensureMermaidServer(workspaceRoot, extensionRoot);
-            const viewerUrlPath = toUrlPath('mermaid-viewer.html');
+            const viewerUrlPath = toUrlPath('html/mermaid-viewer.html');
             const fileQuery = '/' + toUrlPath(targetMdRelPath).replace(/^\/+/, '');
             const refreshToken = Date.now();
             const url = `http://127.0.0.1:${port}/${viewerUrlPath}?file=${fileQuery}&refresh=${refreshToken}`;

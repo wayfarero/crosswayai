@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.3]
+
+- More code refactoring on HTML components for improved maintainability.
+
 ## [1.4.2]
 
 - Refactored extension JavaScript code to improve maintainability and simplify future bug fixes.

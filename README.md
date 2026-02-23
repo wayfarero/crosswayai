@@ -36,6 +36,10 @@ The following commands are available in the Command Palette and via context menu
 
 ## Release Notes
 
+### 1.4.3
+
+- More code refactoring on HTML components for improved maintainability.
+
 ### 1.4.2
 
 - Refactored extension JavaScript code to improve maintainability and simplify future bug fixes.
