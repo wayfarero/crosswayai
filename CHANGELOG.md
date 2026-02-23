@@ -1,0 +1,46 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [1.4.2]
+
+- Refactored extension JavaScript code to improve maintainability and simplify future bug fixes.
+- Fixed impact diagram generation issues, including layout and duplicate-link rendering behavior.
+
+## [1.4.1]
+
+- Bug fixes for workspace configuration and source-path handling.
+- Refactoring of xref and diagram processing internals.
+- Stability improvements for Mermaid rendering and dependency map generation.
+
+## [1.4.0]
+
+- Dropped the Markdown Preview Mermaid extension integration and replaced it with a a proprietary custom Mermaid Viewer.
+- Added a new Mermaid viewer command: `CrossWayAI: View diagram`.
+- Updated the `Generate Impact Diagram` and `Generate Include Diagram` to automatically show the generated diagram using the custom Mermaid Viewer
+
+## [1.3.0]
+- Renamed extension from CrosswAI to CrossWayAI
+
+- Updated package dependencies to automatically install required extensions:
+  - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp)
+  - [Markdown Preview Mermaid Support](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)
+  - [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram)
+
+## [1.2.1]
+
+- Support to send a prompt text to @mermaid chat agent from a text file.
+
+## [1.1.1]
+
+- The mermaid file for the generate diagram commands is now persisted under the .crosswayai folder for future usage.
+
+## [1.1.0]
+
+- Support for Impact and Include Diagrams has been added.
+
+## [1.0.0]
+
+- Initial release of CrossWayAI.
+- Added commands for generating dependency maps and various diagrams.
+- File discovery and hand-off to ABL backend for analysis.

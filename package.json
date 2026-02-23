@@ -1,0 +1,97 @@
+{
+    "name": "crosswayai",
+    "displayName": "CrossWayAI",
+    "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
+    "version": "1.4.2",
+    "publisher": "wayfare",
+    "icon": "resources/CrossWayAI.png",
+    "repository": "https://github.com/wayfarero/crosswayai",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+    "Other"
+   ],
+    "main": "./js/extension.js",
+    "activationEvents": [
+        "onCommand:crosswayai.generateMap",
+        "onCommand:crosswayai.generateImpactDiagram",
+        "onCommand:crosswayai.generateIncludeDiagram",
+        "onCommand:crosswayai.sendToMermaid",
+        "onCommand:crosswayai.openMermaidViewer"
+    ],
+    "contributes": {
+        "submenus": [
+            {
+                "id": "crosswayai.submenu",
+                "label": "CrossWayAI"
+            }
+        ],
+        "commands": [
+            {
+                "command": "crosswayai.generateMap",
+                "title": "CrossWayAI: Generate Dependency Map"
+            },
+            {
+                "command": "crosswayai.generateImpactDiagram",
+                "title": "Generate Impact Diagram"
+            },
+            {
+                "command": "crosswayai.generateIncludeDiagram",
+                "title": "Generate Include Diagram"
+            },
+            {
+                "command": "crosswayai.sendToMermaid",
+                "title": "Send to @mermaid"
+                
+            },
+            {
+                "command": "crosswayai.openMermaidViewer",
+                "title": "View diagram"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "submenu": "crosswayai.submenu",
+                    "when": "editorTextFocus",
+                    "group": "navigation"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "submenu": "crosswayai.submenu",
+                    "group": "navigation"
+                }
+            ],
+            "crosswayai.submenu": [
+                {
+                    "command": "crosswayai.generateImpactDiagram",
+                    "when": "(editorTextFocus && (editorLangId == abl || editorLangId == openedge-abl)) || (resourceExtname =~ /^\\.(p|P|cls|CLS|i|I)$/)",
+                    "group": "navigation"
+                },
+                {
+                    "command": "crosswayai.generateIncludeDiagram",
+                    "when": "(editorTextFocus && (editorLangId == abl || editorLangId == openedge-abl)) || (resourceExtname =~ /^\\.(p|P|cls|CLS|i|I)$/)",
+                    "group": "navigation"
+                },
+                {
+                    "command": "crosswayai.sendToMermaid",
+                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\\/].+/",
+                    "group": "navigation"
+                },
+                {
+                    "command": "crosswayai.openMermaidViewer",
+                    "when": "resourceExtname =~ /^\\.(md|MD)$/",
+                    "group": "navigation"
+                }
+            ]
+        }
+    },
+    "extensionDependencies": [
+        "riversidesoftware.openedge-abl-lsp",
+        "ms-vscode.copilot-mermaid-diagram"
+    ],
+    "dependencies": {}
+}
+

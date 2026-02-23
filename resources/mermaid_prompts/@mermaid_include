@@ -1,0 +1,4 @@
+TD include usage of ttFileLink.i recursive up and down, 
+from workspace relative path: ".crosswayAI/dsMap.json", output to ".crosswayAI/mermaid/include_ttFileLink.i.md"
+Only draw an arrow from a file to another if there is a direct include relationship in your data (not just because both reference a common file).
+Show sibling include relations as well
