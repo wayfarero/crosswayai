@@ -66,7 +66,10 @@
       top: 10px;
       right: 10px;
       display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 6px;
+      max-width: calc(100vw - 20px);
       background: rgba(3,7,18,0.6);
       border: 1px solid #374151;
       border-radius: 8px;
@@ -218,7 +221,7 @@
       return blocks;
     }
 
-    function normalizeMarkdownRequestPath(markdownPath) {
+    function buildMarkdownRequestUrl(markdownPath) {
       const trimmed = (markdownPath || '').trim();
       if (!trimmed) {
         return '';
@@ -228,7 +231,16 @@
         return trimmed;
       }
 
-      return `/${trimmed.replace(/^\/+/, '')}`;
+      const normalized = trimmed
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+
+      const encodedPath = normalized
+        .split('/')
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+
+      return `${window.location.origin}/${encodedPath}`;
     }
 
     function buildExportFileName() {
@@ -346,11 +358,18 @@
         return;
       }
 
-      const requestPath = normalizeMarkdownRequestPath(markdownPath);
+      const requestUrl = buildMarkdownRequestUrl(markdownPath);
       setStatus('Loading markdown...');
 
       try {
-        const response = await fetch(requestPath, { cache: 'no-store' });
+        let response;
+        try {
+          response = await fetch(requestUrl, { cache: 'no-store' });
+        } catch (_) {
+          const retryUrl = `${requestUrl}${requestUrl.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
+          response = await fetch(retryUrl, { cache: 'no-store' });
+        }
+
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }

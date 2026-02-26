@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.4.3",
+    "version": "1.4.4",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "repository": "https://github.com/wayfarero/crosswayai",
@@ -17,6 +17,7 @@
         "onCommand:crosswayai.generateMap",
         "onCommand:crosswayai.generateImpactDiagram",
         "onCommand:crosswayai.generateIncludeDiagram",
+        "onCommand:crosswayai.generateInterfaceDiagram",
         "onCommand:crosswayai.sendToMermaid",
         "onCommand:crosswayai.openMermaidViewer"
     ],
@@ -39,6 +40,10 @@
             {
                 "command": "crosswayai.generateIncludeDiagram",
                 "title": "Generate Include Diagram"
+            },
+            {
+                "command": "crosswayai.generateInterfaceDiagram",
+                "title": "Generate Interface Diagram"
             },
             {
                 "command": "crosswayai.sendToMermaid",
@@ -76,6 +81,11 @@
                     "group": "navigation"
                 },
                 {
+                    "command": "crosswayai.generateInterfaceDiagram",
+                    "when": "(editorTextFocus && (editorLangId == abl || editorLangId == openedge-abl) && resourceExtname =~ /^\\.(cls|CLS)$/) || (resourceExtname =~ /^\\.(cls|CLS)$/)",
+                    "group": "navigation"
+                },
+                {
                     "command": "crosswayai.sendToMermaid",
                     "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\\/].+/",
                     "group": "navigation"
@@ -94,4 +104,3 @@
     ],
     "dependencies": {}
 }
-

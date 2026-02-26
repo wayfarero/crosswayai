@@ -1,4 +1,4 @@
-# CrosswayAI README
+# CrossWayAI README
 
 A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.
 
@@ -10,10 +10,14 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 - **Multiple Diagram Types:** Provides commands to generate various diagrams to visualize your application's architecture, including:
     - Impact Analysis
     - Include Diagram
+    - Interface Diagram
 
 ## Requirements
 
-- Progress OpenEdge installation is required.
+- Progress OpenEdge installation.
+- [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension
+- [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram) VS Code extension
+
 
 ## Getting Started
 
@@ -31,10 +35,16 @@ The following commands are available in the Command Palette and via context menu
 -   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace.
 -   `Generate Impact Diagram`: Generate an impact analysis diagram for the selected file.
 -   `Generate Include Diagram`: Generate an include diagram for the selected file
+-   `Generate Interface Diagram`: Generate an interface diagram for the selected class or interface.
 -   `Send to @mermaid`: Generate a diagram based on a @mermaid chat agent prompt
 -   `View diagram`: Open the local Mermaid viewer for the selected or active markdown file, or prompt you to choose a `.md` file from the workspace
 
 ## Release Notes
+
+### 1.4.4
+
+- Added new `Generate Interface Diagram` option
+- Bug fixing on mermaid rendering auto refresh.
 
 ### 1.4.3
 

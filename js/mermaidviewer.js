@@ -6,6 +6,32 @@ function createMermaidViewer(deps) {
     let mermaidServerExtensionRoot = null;
     let mermaidServerPort = null;
     let mermaidViewerPanel = null;
+    let activeMarkdownRelativePath = null;
+    let activeMarkdownFullPath = null;
+    let markdownFileWatcher = null;
+    let markdownSaveListener = null;
+    let refreshInProgress = false;
+
+    function persistMermaid(workspaceRoot, diagramType, targetFileName, mermaidGraph) {
+        try {
+            const safeBase = `${diagramType}_${targetFileName}`.replace(/[^a-zA-Z0-9_\.\-]/g, '_');
+            const fileName = safeBase + '.md';
+            const dir = path.join(workspaceRoot, '.crosswayai', 'mermaid');
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            const outPath = path.join(dir, fileName);
+            const fenced = '```mermaid\n' + mermaidGraph.trim() + '\n```\n';
+            fs.writeFileSync(outPath, fenced, 'utf8');
+            CrossWayAILog.appendLine(`Saved Mermaid ${diagramType} diagram to ${outPath}`);
+            CrossWayAILog.show(true);
+            return outPath;
+        } catch (err) {
+            CrossWayAILog.appendLine(`Failed to persist Mermaid ${diagramType} diagram: ${err.message}`);
+            CrossWayAILog.show(true);
+            return null;
+        }
+    }
 
     function sanitizeExportFileName(fileName, format = 'png') {
         const rawName = typeof fileName === 'string' ? fileName.trim() : '';
@@ -71,6 +97,80 @@ function createMermaidViewer(deps) {
             .join('/');
     }
 
+    function disposeMarkdownWatcher() {
+        if (markdownFileWatcher) {
+            try {
+                markdownFileWatcher.dispose();
+            } catch (_) {
+            }
+            markdownFileWatcher = null;
+        }
+
+        if (markdownSaveListener) {
+            try {
+                markdownSaveListener.dispose();
+            } catch (_) {
+            }
+            markdownSaveListener = null;
+        }
+
+    }
+
+    function buildViewerUrl(port, targetMdRelPath) {
+        const viewerUrlPath = toUrlPath('html/mermaid-viewer.html');
+        const fileQuery = '/' + toUrlPath(targetMdRelPath).replace(/^\/+/, '');
+        const refreshToken = Date.now();
+        return `http://127.0.0.1:${port}/${viewerUrlPath}?file=${fileQuery}&refresh=${refreshToken}`;
+    }
+
+    function queueViewerRefresh() {
+        if (!mermaidViewerPanel || !activeMarkdownRelativePath || !mermaidServerPort || refreshInProgress) {
+            return;
+        }
+
+        refreshInProgress = true;
+
+        (async () => {
+            try {
+                const refreshUrl = buildViewerUrl(mermaidServerPort, activeMarkdownRelativePath);
+                await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url: refreshUrl });
+                CrossWayAILog.appendLine(`Mermaid viewer refreshed: ${activeMarkdownRelativePath}`);
+            } catch (error) {
+                CrossWayAILog.appendLine(`Failed to refresh Mermaid viewer: ${error.message}`);
+            } finally {
+                refreshInProgress = false;
+            }
+        })();
+    }
+
+    function updateMarkdownWatcher(workspaceFolder, targetMdRelPath) {
+        disposeMarkdownWatcher();
+
+        if (!workspaceFolder || !targetMdRelPath) {
+            return;
+        }
+
+        const normalizedRelPath = targetMdRelPath.split(path.sep).join('/');
+        const filePattern = new vscode.RelativePattern(workspaceFolder, normalizedRelPath);
+        markdownFileWatcher = vscode.workspace.createFileSystemWatcher(filePattern, false, false, false);
+
+        markdownFileWatcher.onDidChange(() => queueViewerRefresh());
+        markdownFileWatcher.onDidCreate(() => queueViewerRefresh());
+        markdownFileWatcher.onDidDelete(() => queueViewerRefresh());
+
+        markdownSaveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+            if (!activeMarkdownFullPath || !document || !document.uri || !document.uri.fsPath) {
+                return;
+            }
+
+            if (document.uri.fsPath.toLowerCase() === activeMarkdownFullPath.toLowerCase()) {
+                queueViewerRefresh();
+            }
+        });
+
+        CrossWayAILog.appendLine(`Watching Mermaid markdown: ${normalizedRelPath}`);
+    }
+
     function extractFsPath(candidate) {
         if (!candidate) {
             return null;
@@ -107,7 +207,7 @@ function createMermaidViewer(deps) {
             if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
                 return null;
             }
-            return rel;
+            return rel.split(path.sep).join('/');
         }
 
         const uriPath = extractFsPath(uri);
@@ -305,7 +405,8 @@ function createMermaidViewer(deps) {
             return;
         }
 
-        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+        const workspaceFolder = workspaceFolders[0];
+        const workspaceRoot = workspaceFolder.uri.fsPath;
         const extensionRoot = context && context.extensionPath ? context.extensionPath : path.resolve(__dirname, '..');
         const viewerPath = path.join(extensionRoot, 'html', 'mermaid-viewer.html');
         if (!fs.existsSync(viewerPath)) {
@@ -323,13 +424,12 @@ function createMermaidViewer(deps) {
         }
 
         const targetMdFullPath = path.join(workspaceRoot, targetMdRelPath);
+        activeMarkdownRelativePath = targetMdRelPath;
+        activeMarkdownFullPath = targetMdFullPath;
 
         try {
             const port = await ensureMermaidServer(workspaceRoot, extensionRoot);
-            const viewerUrlPath = toUrlPath('html/mermaid-viewer.html');
-            const fileQuery = '/' + toUrlPath(targetMdRelPath).replace(/^\/+/, '');
-            const refreshToken = Date.now();
-            const url = `http://127.0.0.1:${port}/${viewerUrlPath}?file=${fileQuery}&refresh=${refreshToken}`;
+            const url = buildViewerUrl(port, targetMdRelPath);
 
             if (!mermaidViewerPanel) {
                 mermaidViewerPanel = vscode.window.createWebviewPanel(
@@ -343,6 +443,9 @@ function createMermaidViewer(deps) {
                 );
 
                 mermaidViewerPanel.onDidDispose(() => {
+                    disposeMarkdownWatcher();
+                    activeMarkdownRelativePath = null;
+                    activeMarkdownFullPath = null;
                     mermaidViewerPanel = null;
                 });
 
@@ -351,6 +454,8 @@ function createMermaidViewer(deps) {
                 mermaidViewerPanel.reveal(vscode.ViewColumn.Beside, false);
                 await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url });
             }
+
+            updateMarkdownWatcher(workspaceFolder, targetMdRelPath);
 
             if (!fs.existsSync(targetMdFullPath)) {
                 vscode.window.showInformationMessage(`CrossWayAI: Viewer opened. Target markdown not found: ${targetMdRelPath}`);
@@ -363,6 +468,10 @@ function createMermaidViewer(deps) {
     }
 
     function deactivateMermaidViewer() {
+        disposeMarkdownWatcher();
+        activeMarkdownRelativePath = null;
+        activeMarkdownFullPath = null;
+
         if (mermaidViewerPanel) {
             try {
                 mermaidViewerPanel.dispose();
@@ -384,7 +493,8 @@ function createMermaidViewer(deps) {
 
     return {
         openMermaidViewer,
-        deactivateMermaidViewer
+        deactivateMermaidViewer,
+        persistMermaid
     };
 }
 

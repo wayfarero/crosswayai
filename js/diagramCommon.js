@@ -65,6 +65,12 @@ function getDiagramConfig(diagramType) {
                 persistDiagramType: 'impact',
                 errorMessage: 'CrossWayAI: An error occurred during impact diagram generation.'
             };
+        case 'interface':
+            return {
+                missingRelationshipMessage: 'CrossWayAI: dsMap.json is missing interface relationship data. Regenerate the map first.',
+                persistDiagramType: 'interface',
+                errorMessage: 'CrossWayAI: An error occurred during interface diagram generation.'
+            };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
     }

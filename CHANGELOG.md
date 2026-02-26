@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.4
+
+- Added new `Generate Interface Diagram` option
+- Bug fixing on mermaid rendering auto refresh.
+
 ## [1.4.3]
 
 - More code refactoring on HTML components for improved maintainability.
