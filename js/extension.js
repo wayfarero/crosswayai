@@ -6,6 +6,7 @@ const { generateDependencyMap } = require('./dependencyMap');
 const { generateIncludeDiagram } = require('./includeDiagram');
 const { generateImpactDiagram } = require('./impactDiagram');
 const { generateInterfaceDiagram } = require('./interfaceDiagram');
+const { generateCallDiagram } = require('./callDiagram');
 const { sendToMermaid } = require('./sendToMermaid');
 const { createMermaidViewer } = require('./mermaidviewer');
 
@@ -46,6 +47,7 @@ function activate(context) {
     const handleImpactDiagram = (ctx, uri) => generateImpactDiagram(ctx, uri, getDiagramDeps());
     const handleIncludeDiagram = (ctx, uri) => generateIncludeDiagram(ctx, uri, getDiagramDeps());
     const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
+    const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
     const handleSendToMermaid = (ctx, uri) => sendToMermaid(ctx, uri, { vscode, fs });
 
     const commands = [
@@ -53,6 +55,7 @@ function activate(context) {
         { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram },
         { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram },
         { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram },
+        { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram },
         { name: 'crosswayai.sendToMermaid', handler: handleSendToMermaid },
         { name: 'crosswayai.openMermaidViewer', handler: openMermaidViewer }
     ];

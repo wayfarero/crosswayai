@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.0
+
+- Bug fixed CrossWayAI submenu visibility in explorer context menu for supported file types.
+- Renamed all diagram types options by removing the `Generate` prefix
+- Renamed mermaid viewer container tab to "CrossWayAI viewer - <.md file name>"
+- Added new `Call Diagram` option
+
 ## 1.4.4
 
 - Added new `Generate Interface Diagram` option

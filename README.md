@@ -33,13 +33,21 @@ Once the analysis is complete, you can use the other commands to generate specif
 The following commands are available in the Command Palette and via context menus:
 
 -   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace.
--   `Generate Impact Diagram`: Generate an impact analysis diagram for the selected file.
--   `Generate Include Diagram`: Generate an include diagram for the selected file
--   `Generate Interface Diagram`: Generate an interface diagram for the selected class or interface.
+-   `Impact Diagram`: Generate an impact analysis diagram for the selected file.
+-   `Include Diagram`: Generate an include diagram for the selected file
+-   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
+-   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
 -   `Send to @mermaid`: Generate a diagram based on a @mermaid chat agent prompt
 -   `View diagram`: Open the local Mermaid viewer for the selected or active markdown file, or prompt you to choose a `.md` file from the workspace
 
 ## Release Notes
+
+### 1.5.0
+
+- Bug fixed CrossWayAI submenu visibility in explorer context menu for supported file types.
+- Renamed all diagram types options by removing the `Generate` prefix
+- Renamed mermaid viewer container tab to "CrossWayAI viewer - <.md file name>"
+- Added new `Call Diagram` option
 
 ### 1.4.4
 

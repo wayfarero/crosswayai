@@ -431,10 +431,11 @@ function createMermaidViewer(deps) {
             const port = await ensureMermaidServer(workspaceRoot, extensionRoot);
             const url = buildViewerUrl(port, targetMdRelPath);
 
+            const viewerLabel = `CrossWayAI Viewer - ${path.basename(targetMdRelPath)}`;
             if (!mermaidViewerPanel) {
                 mermaidViewerPanel = vscode.window.createWebviewPanel(
                     'crosswayaiMermaidViewer',
-                    'CrossWayAI Diagram',
+                    viewerLabel,
                     vscode.ViewColumn.Beside,
                     {
                         enableScripts: true,
@@ -451,6 +452,8 @@ function createMermaidViewer(deps) {
 
                 mermaidViewerPanel.webview.html = getMermaidViewerHostHtml(url);
             } else {
+                // Always update the tab label to reflect the current file
+                mermaidViewerPanel.title = viewerLabel;
                 mermaidViewerPanel.reveal(vscode.ViewColumn.Beside, false);
                 await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url });
             }

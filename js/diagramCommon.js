@@ -34,7 +34,7 @@ function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
     const fileLinks = getDsMapArray(dsMap, 'ttFileLink');
 
     if (fileNodes.length === 0 || fileLinks.length === 0) {
-        vscode.window.showWarningMessage(missingRelationshipMessage);
+        vscode.window.showWarningMessage('CrossWayAI: dsMap.json is missing required relationship information. Regenerate the map first.');
         return null;
     }
 
@@ -55,21 +55,23 @@ function getDiagramConfig(diagramType) {
     switch (diagramType) {
         case 'include':
             return {
-                missingRelationshipMessage: 'CrossWayAI: dsMap.json is missing include relationship data. Regenerate the map first.',
                 persistDiagramType: 'include',
                 errorMessage: 'CrossWayAI: An error occurred during include diagram generation.'
             };
         case 'impact':
             return {
-                missingRelationshipMessage: 'CrossWayAI: dsMap.json is missing dependency relationship data. Regenerate the map first.',
                 persistDiagramType: 'impact',
                 errorMessage: 'CrossWayAI: An error occurred during impact diagram generation.'
             };
         case 'interface':
             return {
-                missingRelationshipMessage: 'CrossWayAI: dsMap.json is missing interface relationship data. Regenerate the map first.',
                 persistDiagramType: 'interface',
                 errorMessage: 'CrossWayAI: An error occurred during interface diagram generation.'
+            };
+        case 'call':
+            return {
+                persistDiagramType: 'call',
+                errorMessage: 'CrossWayAI: An error occurred during call diagram generation.'
             };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
@@ -81,7 +83,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     const config = getDiagramConfig(diagramType);
 
     try {
-        const resolvedContext = resolveDiagramContext(context, uri, deps, config.missingRelationshipMessage);
+        const resolvedContext = resolveDiagramContext(context, uri, deps);
         if (!resolvedContext) {
             return;
         }
