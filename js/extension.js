@@ -9,6 +9,7 @@ const { generateInterfaceDiagram } = require('./interfaceDiagram');
 const { generateCallDiagram } = require('./callDiagram');
 const { sendToMermaid } = require('./sendToMermaid');
 const { createMermaidViewer } = require('./mermaidviewer');
+const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
@@ -49,6 +50,39 @@ function activate(context) {
     const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
     const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
     const handleSendToMermaid = (ctx, uri) => sendToMermaid(ctx, uri, { vscode, fs });
+    const getDumpDfFileDeps = () => ({
+        vscode,
+        fs,
+        path,
+        CrossWayAILog
+    });
+    // Updated to support new dumpDfFile signature with optional arguments
+    const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getDumpDfFileDeps(), dbName, workspaceRoot, pfFilePath);
+    const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getDumpDfFileDeps());
+    
+    const handleTableRelationsDiagram = async (ctx, uri) => {
+        if (!uri || !uri.fsPath) {
+            vscode.window.showErrorMessage('No file selected');
+            return;
+        }
+        
+        try {
+            // Get the filename without extension (database name)
+            const fileName = path.basename(uri.fsPath, path.extname(uri.fsPath));
+            
+            // Read the template file
+            const templatePath = path.join(ctx.extensionPath, 'resources', 'mermaid_prompts', '@mermaid_table_relations');
+            const templateContent = fs.readFileSync(templatePath, 'utf8');
+            
+            // Replace <databasename> with actual database name
+            const prompt = templateContent.replace(/<databasename>/g, fileName);
+            
+            // Open chat and pre-fill it with the prompt
+            await vscode.commands.executeCommand('workbench.action.chat.open', { query: `@mermaid\n${prompt}` });
+        } catch (error) {
+            vscode.window.showErrorMessage(`Error processing table relations: ${error.message}`);
+        }
+    };
 
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
@@ -57,7 +91,10 @@ function activate(context) {
         { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram },
         { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram },
         { name: 'crosswayai.sendToMermaid', handler: handleSendToMermaid },
-        { name: 'crosswayai.openMermaidViewer', handler: openMermaidViewer }
+        { name: 'crosswayai.openMermaidViewer', handler: openMermaidViewer },
+        { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
+        { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
+        { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram }
     ];
 
     commands.forEach(command => {

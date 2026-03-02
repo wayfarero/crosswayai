@@ -11,6 +11,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Impact Analysis
     - Include Diagram
     - Interface Diagram
+    - Call Diagram
 
 ## Requirements
 
@@ -32,15 +33,28 @@ Once the analysis is complete, you can use the other commands to generate specif
 
 The following commands are available in the Command Palette and via context menus:
 
--   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace.
+-   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace projects' files.
+-   `CrossWayAI: Dump All DB Definitions`: Helper command to dump the current workspace databases schema definition files in order to enable users to generate table relationship diagrams using the @mermAId chat agent.
 -   `Impact Diagram`: Generate an impact analysis diagram for the selected file.
 -   `Include Diagram`: Generate an include diagram for the selected file
 -   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
+-   `Table Relations`: Generate the selected .df file's tables relations diagram using @mermAId chat agent
 -   `Send to @mermaid`: Generate a diagram based on a @mermaid chat agent prompt
 -   `View diagram`: Open the local Mermaid viewer for the selected or active markdown file, or prompt you to choose a `.md` file from the workspace
 
 ## Release Notes
+
+### 1.5.2
+
+- Bug fixes on diagram commands
+- Added new explorer and editor context command `Table relations` to AI generate the database table relations diagram (.md file under .crosswayai/mermaid) out of the selected .df file , using the @mermAId chat agent
+
+
+### 1.5.1
+
+- Added support to generate database table relations diagram using `@mermaid_table_relations` template prompt out of .df files dumped by new `CrossWayAI: Dump All DB Definitions` command
+
 
 ### 1.5.0
 

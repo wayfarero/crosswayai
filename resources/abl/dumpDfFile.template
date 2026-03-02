@@ -1,0 +1,18 @@
+CREATE ALIAS DICTDB FOR DATABASE <database_name>.
+DISPLAY LDBNAME("DICTDB").
+
+os-create-dir value("<workspaceRoot>\.crosswayai\dump").
+
+RUN prodict\dump_df.p   ("ALL",
+                         "<workspaceRoot>\.crosswayai\dump\<database_name>.df",
+                          "").
+/*
+Input parameters:
+    file-name                : "ALL" or "<file-name> [,<filename>] ..." -> comma-delimited list of table names
+    df-file-name             : Name of file to dump to
+    code-page                : ?, "", "<code-page>"
+               ?             = no conversion
+               ""            = default conversion (SESSION:STREAM)
+               "<code-page>" =  convert to <code-page>
+
+*/

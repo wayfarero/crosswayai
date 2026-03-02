@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.2
+
+- Bug fixes on diagram commands
+- Added new explorer and editor context command `Table relations` to AI generate the database table relations diagram (.md file under .crosswayai/mermaid) out of the selected .df file , using the @mermAId chat agent
+
+
+## 1.5.1
+
+- Added support to generate database table relations diagram using `@mermaid_table_relations` template prompt out of .df files dumped by new `CrossWayAI: Dump All DB Definitions` command
+
+
 ## 1.5.0
 
 - Bug fixed CrossWayAI submenu visibility in explorer context menu for supported file types.

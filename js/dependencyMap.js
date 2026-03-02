@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { runABLScript } = require('./diagramCommon');
 
 async function generateDependencyMap(context, deps) {
     const { vscode, fs, path, CrossWayAILog } = deps;
@@ -52,7 +52,12 @@ async function generateDependencyMap(context, deps) {
         vscode.window.showInformationMessage(`CrossWayAI: Found ${dsMap.dsMap.ttFile.length} files. Initial dsMap.json created.`);
 
         vscode.window.showInformationMessage('CrossWayAI: Handing off to ABL script for deep analysis...');
-        await runABLAnalysis(context, workspaceRoot, { vscode, fs, path, CrossWayAILog });
+        await runABLAnalysis(context, workspaceRoot, deps);
+
+        CrossWayAILog.appendLine("Done generating dependency map.");
+        CrossWayAILog.show(true);
+        vscode.window.showInformationMessage('CrossWayAI: Dependency map generation complete.');
+
     } catch (error) {
         CrossWayAILog.appendLine(`**Error during map generation: ${error.message}`);
         CrossWayAILog.show(true);
@@ -61,64 +66,9 @@ async function generateDependencyMap(context, deps) {
 }
 
 async function runABLAnalysis(context, workspaceRoot, deps) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
-    const dlcEnv = process.env.DLC || process.env.dlc;
-
-    if (!dlcEnv) {
-        vscode.window.showErrorMessage('Environment variable DLC is not set. Please set %DLC% to your OpenEdge installation path and restart VS Code.');
-        return;
-    }
-
-    const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
-    const logFile = path.join(crosswayaiDir, 'crosswayai.log');
-    const logStream = fs.createWriteStream(logFile, { flags: 'a' });
-
-    const extensionAblPath = path.join(context.extensionPath, 'crosswayai.pl');
-    const runScriptPath = path.join('core', 'runAnalysis.p');
-
-    const propath = [
-        extensionAblPath
-    ].join(',');
-
-    const executable = path.join(dlcEnv, 'bin', '_progres');
-    const args = [
-        '-b',
-        '-p',
-        runScriptPath,
-        '-baseADE',
-        propath,
-        '-param',
-        `${workspaceRoot}`
-    ];
-
-    CrossWayAILog.appendLine(`>Spawning ABL process: ${executable} ${args.join(' ')}`);
-    CrossWayAILog.appendLine(`>Logging to: ${logFile}`);
-    CrossWayAILog.show(true);
-
-    return new Promise((resolve, reject) => {
-        const ablProcess = spawn(executable, args);
-
-        ablProcess.stdout.pipe(logStream);
-        ablProcess.stderr.pipe(logStream);
-
-        ablProcess.on('error', (error) => {
-            console.error(`spawn error: ${error}`);
-            vscode.window.showErrorMessage(`ABL script execution failed. Make sure '${executable}' is in your system's PATH. Error: ${error.message}`);
-            reject(error);
-        });
-
-        ablProcess.on('close', (code) => {
-            if (code !== 0) {
-                console.error(`ABL process exited with code ${code}`);
-                vscode.window.showErrorMessage(`ABL script execution failed with code ${code}. See ${logFile} for details.`);
-                reject(new Error(`ABL process exited with code ${code}`));
-            } else {
-                console.log('ABL process finished successfully.');
-                vscode.window.showInformationMessage('CrossWayAI: Dependency map generation complete!');
-                resolve();
-            }
-        });
-    });
+    // Pass workspaceRoot as -param via extraArgs
+    const extraArgs = ['-param', workspaceRoot];
+    await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runAnalysis.p', args: extraArgs });
 }
 
 function findProjectRoot(startDir, deps) {

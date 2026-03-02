@@ -4,7 +4,7 @@ async function generateImpactDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'impact', generateMermaidImpactGraph);
 }
 
-function generateMermaidImpactGraph(dsMap, targetNode, deps) {
+function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const { vscode, getDsMapArray } = deps;
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
@@ -58,7 +58,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps) {
         return null;
     }
 
-    const graphWriter = createMermaidGraphWriter(targetNode);
+    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
     const edges = new Map();

@@ -1,3 +1,69 @@
+/**
+ * Runs an ABL script using the provided parameters.
+ * @param {Object} options - Options for running the ABL script.
+ * @param {Object} options.context - VS Code extension context.
+ * @param {string} options.workspaceRoot - The workspace root directory.
+ * @param {Object} options.deps - Dependency injection object (vscode, fs, path, CrossWayAILog).
+ * @param {string} [options.scriptName] - The relative path to the ABL script to run (default: 'core/runAnalysis.p').
+ * @param {string} [options.propath] - The PROPATH to use (default: extension's crosswayai.pl).
+ * @param {string[]} [options.args] - Additional arguments for the ABL process.
+ * @returns {Promise<void>} Resolves when the process finishes successfully, rejects on error.
+ */
+async function runABLScript({ context, workspaceRoot, deps, scriptName, args: extraArgs = []}) {
+    const { vscode, fs, path, CrossWayAILog } = deps;
+    const dlcEnv = process.env.DLC || process.env.dlc;
+    if (!dlcEnv) {
+        vscode.window.showErrorMessage('Environment variable DLC is not set. Please set %DLC% to your OpenEdge installation path and restart VS Code.');
+        return;
+    }
+    const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
+    const logFile = path.join(crosswayaiDir, 'crosswayai.log');
+    const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+    const extensionAblPath = path.join(context.extensionPath, 'crosswayai.pl');
+    const prodictPath = path.join(dlcEnv, 'tty','prodict.pl');
+    const adecommPath = path.join(dlcEnv, 'tty','adecomm.pl');
+    const runScriptPath = scriptName;
+    const effectivePropath = `${extensionAblPath},${context.extensionPath},${prodictPath},${adecommPath}`;
+    const executable = path.join(dlcEnv, 'bin', '_progres');
+    const args = [
+        '-b',
+        '-p',
+        runScriptPath,
+        '-baseADE',
+        effectivePropath
+    ];
+    if (extraArgs && Array.isArray(extraArgs)) {
+        args.push(...extraArgs);
+    }
+
+    CrossWayAILog.appendLine(`>Spawning ABL process: ${executable} ${args.join(' ')}`);
+    CrossWayAILog.appendLine(`>Logging to: ${logFile}`);
+    CrossWayAILog.show(true);
+    return new Promise((resolve, reject) => {
+        const ablProcess = require('child_process').spawn(executable, args);
+        ablProcess.stdout.pipe(logStream);
+        ablProcess.stderr.pipe(logStream);
+        ablProcess.on('error', (error) => {
+            CrossWayAILog.appendLine(`spawn error: ${error}`);
+            CrossWayAILog.show(true);
+            vscode.window.showErrorMessage(`ABL script execution failed. Make sure '${executable}' is in your system's PATH. Error: ${error.message}`);
+            reject(error);
+        });
+        ablProcess.on('close', (code) => {
+            if (code !== 0) {
+                CrossWayAILog.appendLine(`ABL process exited with code ${code}`);
+                CrossWayAILog.show(true);
+                vscode.window.showErrorMessage(`ABL script execution failed with code ${code}. See ${logFile} for details.`);
+                reject(new Error(`ABL process exited with code ${code}`));
+            } else {
+                CrossWayAILog.appendLine(`>ABL process finished successfully.`);
+                CrossWayAILog.show(true);
+                vscode.window.showInformationMessage('CrossWayAI: ABL process finished successfully!');
+                resolve();
+            }
+        });
+    });
+}
 function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
     const { vscode, fs, path, getDsMapArray } = deps;
     let filePath = '';
@@ -107,8 +173,8 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     }
 }
 
-function createMermaidGraphWriter(targetNode) {
-    let mermaidGraph = 'graph LR;\n';
+function createMermaidGraphWriter(targetNode, graphType = 'LR') {
+    let mermaidGraph = `graph ${graphType};\n`;
     const declaredNodes = new Set();
 
     function getMermaidNodeId(fileName) {
@@ -163,5 +229,6 @@ function createMermaidGraphWriter(targetNode) {
 module.exports = {
     resolveDiagramContext,
     createMermaidGraphWriter,
-    generateDiagram
+    generateDiagram,
+    runABLScript
 };

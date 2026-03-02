@@ -2,16 +2,43 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.5.0",
+    "version": "1.5.2",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
+    "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",
     "repository": "https://github.com/wayfarero/crosswayai",
+    "bugs": {
+		"url": "https://github.com/wayfarero/crosswayai/issues"
+	},
+    "license": "MIT",
+	"licenses": [
+		{
+			"type": "MIT",
+			"url": "https://github.com/wayfarero/crosswayai/blob/main/LICENSE"
+		}
+	],
     "engines": {
         "vscode": "^1.85.0"
     },
     "categories": [
-    "Other"
+        "analysis", "programming", "visualization", "development", "AI-assisted development"
    ],
+   "keywords": [
+		"4gl",
+		"abl",
+		"openedge",
+		"progress",
+        "code visualization",
+        "graph",
+        "code analysis", 
+        "mermaid",
+        "diagrams",
+        "code map",
+        "documentation",
+        "software architecture",
+        "design",
+        "code review"
+	],
     "main": "./js/extension.js",
         "activationEvents": [
             "onCommand:crosswayai.generateMap",
@@ -20,7 +47,9 @@
             "onCommand:crosswayai.generateInterfaceDiagram",
             "onCommand:crosswayai.generateCallDiagram",
             "onCommand:crosswayai.sendToMermaid",
-            "onCommand:crosswayai.openMermaidViewer"
+            "onCommand:crosswayai.openMermaidViewer",
+            "onCommand:crosswayai.dumpAllDBDefinitions",
+            "onCommand:crosswayai.generateTableRelationsDiagram"
         ],
     "contributes": {
         "submenus": [
@@ -33,6 +62,10 @@
             {
                 "command": "crosswayai.generateMap",
                 "title": "CrossWayAI: Generate Dependency Map"
+            },
+            {
+                "command": "crosswayai.dumpAllDBDefinitions",
+                "title": "CrossWayAI: Dump All DB Definitions"
             },
             {
                 "command": "crosswayai.generateImpactDiagram",
@@ -53,11 +86,14 @@
             {
                 "command": "crosswayai.sendToMermaid",
                 "title": "Send to @mermaid"
-                
             },
             {
                 "command": "crosswayai.openMermaidViewer",
                 "title": "View diagram"
+            },
+            {
+                "command": "crosswayai.generateTableRelationsDiagram",
+                "title": "Table Relations Diagram"
             }
         ],
         "menus": {
@@ -77,7 +113,7 @@
             "crosswayai.submenu": [
                 {
                     "command": "crosswayai.generateCallDiagram",
-                    "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W|i|I)$/",
+                    "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/",
                     "group": "navigation"
                 },
                 {
@@ -97,12 +133,17 @@
                 },
                 {
                     "command": "crosswayai.sendToMermaid",
-                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\/].+/",
+                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\\/].+/",
                     "group": "navigation"
                 },
                 {
                     "command": "crosswayai.openMermaidViewer",
                     "when": "resourceExtname =~ /^\\.(md|MD)$/",
+                    "group": "navigation"
+                },
+                {
+                    "command": "crosswayai.generateTableRelationsDiagram",
+                    "when": "resourceExtname =~ /^\\.(df|DF)$/",
                     "group": "navigation"
                 }
             ]

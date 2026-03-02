@@ -4,7 +4,7 @@ async function generateIncludeDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'include', generateMermaidIncludeGraph);
 }
 
-function generateMermaidIncludeGraph(dsMap, targetNode, deps) {
+function generateMermaidIncludeGraph(dsMap, targetNode, deps, graphType = 'TD') {
     const { vscode, getDsMapArray } = deps;
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
@@ -16,59 +16,40 @@ function generateMermaidIncludeGraph(dsMap, targetNode, deps) {
     }
 
     const linksToRender = new Set();
-    const roots = new Set();
-    const visitedForRoots = new Set();
 
-    function findRoots(nodeId) {
-        if (!nodeId || visitedForRoots.has(nodeId)) {
-            return;
-        }
-        visitedForRoots.add(nodeId);
-
+    // Traverse up (files that reference the starting include file)
+    function collectUpstream(nodeId, visited) {
+        if (!nodeId || visited.has(nodeId)) return;
+        visited.add(nodeId);
+        
         const parentLinks = allFileLinks.filter(link => link.NodeId === nodeId && link.LinkType === 'include');
-        if (parentLinks.length === 0) {
-            roots.add(nodeId);
-        } else {
-            parentLinks.forEach(parentLink => {
-                findRoots(parentLink.ParentNodeId);
-            });
-        }
+        parentLinks.forEach(link => {
+            linksToRender.add(link);
+            collectUpstream(link.ParentNodeId, visited);
+        });
     }
 
-    findRoots(startNodeId);
-
-    if (roots.size === 0 && visitedForRoots.has(startNodeId)) {
-        roots.add(startNodeId);
-    }
-
-    const visitedForGraph = new Set();
-    function collectAllLinks(nodeId) {
-        if (!nodeId || visitedForGraph.has(nodeId)) {
-            return;
-        }
-        visitedForGraph.add(nodeId);
+    // Traverse down (files referenced by the starting include file)
+    function collectDownstream(nodeId, visited) {
+        if (!nodeId || visited.has(nodeId)) return;
+        visited.add(nodeId);
 
         const childLinks = allFileLinks.filter(link => link.ParentNodeId === nodeId && link.LinkType === 'include');
         childLinks.forEach(link => {
             linksToRender.add(link);
-            collectAllLinks(link.NodeId);
+            collectDownstream(link.NodeId, visited);
         });
     }
 
-    roots.forEach(rootId => {
-        collectAllLinks(rootId);
-    });
+    collectUpstream(startNodeId, new Set());
+    collectDownstream(startNodeId, new Set());
 
     if (linksToRender.size === 0) {
-        const hasIncludes = allFileLinks.some(link => link.ParentNodeId === startNodeId && link.LinkType === 'include');
-        const isIncluded = allFileLinks.some(link => link.NodeId === startNodeId && link.LinkType === 'include');
-        if (!hasIncludes && !isIncluded) {
-            vscode.window.showInformationMessage(`No include references found for ${targetNode.FileName}.`);
-            return null;
-        }
+        vscode.window.showInformationMessage(`No include references found for ${targetNode.FileName}.`);
+        return null;
     }
 
-    const graphWriter = createMermaidGraphWriter(targetNode);
+    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
     const renderedEdges = new Set();
 

@@ -4,7 +4,7 @@ async function generateCallDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'call', generateMermaidCallGraph);
 }
 
-function generateMermaidCallGraph(dsMap, targetNode, deps) {
+function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const { vscode, getDsMapArray } = deps;
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
@@ -57,7 +57,7 @@ function generateMermaidCallGraph(dsMap, targetNode, deps) {
         return null;
     }
 
-    const graphWriter = createMermaidGraphWriter(targetNode);
+    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
     const edges = new Map();

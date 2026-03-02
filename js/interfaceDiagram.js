@@ -4,7 +4,7 @@ async function generateInterfaceDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'interface', generateMermaidInterfaceGraph);
 }
 
-function generateMermaidInterfaceGraph(dsMap, targetNode) {
+function generateMermaidInterfaceGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const allFileLinks = dsMap.dsMap.ttFileLink || [];
     const allFileNodes = dsMap.dsMap.ttFileNode || [];
     const startNodeId = targetNode.NodeId;
@@ -95,7 +95,7 @@ function generateMermaidInterfaceGraph(dsMap, targetNode) {
     const hasOutgoingLinks = Array.from(linksToRender).some(link => link.ParentNodeId === startNodeId);
     const hasIncomingLinks = Array.from(linksToRender).some(link => link.NodeId === startNodeId);
 
-    let mermaidGraph = 'graph BT;\n';
+    let mermaidGraph = `graph ${graphType};\n`;
     const declaredNodes = new Set();
 
     function getMermaidNodeId(fileName) {
