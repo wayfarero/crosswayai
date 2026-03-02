@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## 1.6.0
+
+- Added support for `Inheritance Diagram` via new explorer and editor context menu
 
 ## 1.5.2
 

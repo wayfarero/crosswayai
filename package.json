@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.5.2",
+    "version": "1.6.0",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",
@@ -46,6 +46,7 @@
             "onCommand:crosswayai.generateIncludeDiagram",
             "onCommand:crosswayai.generateInterfaceDiagram",
             "onCommand:crosswayai.generateCallDiagram",
+            "onCommand:crosswayai.generateInheritanceDiagram",
             "onCommand:crosswayai.sendToMermaid",
             "onCommand:crosswayai.openMermaidViewer",
             "onCommand:crosswayai.dumpAllDBDefinitions",
@@ -82,6 +83,10 @@
             {
                 "command": "crosswayai.generateCallDiagram",
                 "title": "Call Diagram"
+            },
+            {
+                "command": "crosswayai.generateInheritanceDiagram",
+                "title": "Inheritance Diagram"
             },
             {
                 "command": "crosswayai.sendToMermaid",
@@ -131,9 +136,12 @@
                     "when": "resourceExtname =~ /^\\.(cls|CLS)$/",
                     "group": "navigation"
                 },
-                {
-                    "command": "crosswayai.sendToMermaid",
-                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\\/].+/",
+                {   "command": "crosswayai.generateInheritanceDiagram",
+                    "when": "resourceExtname =~ /^\\.(cls|CLS)$/",
+                    "group": "navigation"
+                },
+                {   "command": "crosswayai.sendToMermaid",
+                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\/].+/",
                     "group": "navigation"
                 },
                 {

@@ -139,6 +139,11 @@ function getDiagramConfig(diagramType) {
                 persistDiagramType: 'call',
                 errorMessage: 'CrossWayAI: An error occurred during call diagram generation.'
             };
+        case 'inheritance':
+            return {
+                persistDiagramType: 'inheritance',
+                errorMessage: 'CrossWayAI: An error occurred during inheritance diagram generation.'
+            };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
     }

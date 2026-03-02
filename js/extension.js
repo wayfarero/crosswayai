@@ -7,6 +7,7 @@ const { generateIncludeDiagram } = require('./includeDiagram');
 const { generateImpactDiagram } = require('./impactDiagram');
 const { generateInterfaceDiagram } = require('./interfaceDiagram');
 const { generateCallDiagram } = require('./callDiagram');
+const { generateInheritanceDiagram } = require('./inheritanceDiagram');
 const { sendToMermaid } = require('./sendToMermaid');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
@@ -49,6 +50,7 @@ function activate(context) {
     const handleIncludeDiagram = (ctx, uri) => generateIncludeDiagram(ctx, uri, getDiagramDeps());
     const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
     const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
+    const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
     const handleSendToMermaid = (ctx, uri) => sendToMermaid(ctx, uri, { vscode, fs });
     const getDumpDfFileDeps = () => ({
         vscode,
@@ -90,6 +92,7 @@ function activate(context) {
         { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram },
         { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram },
         { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram },
+        { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram },
         { name: 'crosswayai.sendToMermaid', handler: handleSendToMermaid },
         { name: 'crosswayai.openMermaidViewer', handler: openMermaidViewer },
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },

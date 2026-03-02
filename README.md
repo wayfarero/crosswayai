@@ -38,12 +38,17 @@ The following commands are available in the Command Palette and via context menu
 -   `Impact Diagram`: Generate an impact analysis diagram for the selected file.
 -   `Include Diagram`: Generate an include diagram for the selected file
 -   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
+-   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
 -   `Table Relations`: Generate the selected .df file's tables relations diagram using @mermAId chat agent
 -   `Send to @mermaid`: Generate a diagram based on a @mermaid chat agent prompt
 -   `View diagram`: Open the local Mermaid viewer for the selected or active markdown file, or prompt you to choose a `.md` file from the workspace
 
 ## Release Notes
+
+### 1.6.0
+
+- Added support for Inheritance Diagram via new explorer and editor context menu
 
 ### 1.5.2
 
