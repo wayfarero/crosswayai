@@ -31,8 +31,11 @@
       width: 100%;
       height: 100%;
       overflow: auto;
-      cursor: default;
+      cursor: grab;
       display: block;
+    }
+    #stage.dragging {
+      cursor: grabbing;
     }
     #diagram {
       width: max-content;
@@ -393,6 +396,46 @@
     document.getElementById('zoomOut').addEventListener('click', () => applyZoom(currentZoom / 1.2, true));
     document.getElementById('fit').addEventListener('click', fitDiagramToViewport);
     document.getElementById('reset').addEventListener('click', () => applyZoom(1, true));
+
+    // Mouse wheel zoom functionality
+    stage.addEventListener('wheel', (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
+        applyZoom(currentZoom * zoomFactor, false);
+      }
+    });
+
+    // Drag to pan functionality
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartScrollLeft = 0;
+    let dragStartScrollTop = 0;
+
+    stage.addEventListener('mousedown', (event) => {
+      isDragging = true;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      dragStartScrollLeft = stage.scrollLeft;
+      dragStartScrollTop = stage.scrollTop;
+      stage.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (event) => {
+      if (!isDragging) return;
+
+      const deltaX = event.clientX - dragStartX;
+      const deltaY = event.clientY - dragStartY;
+
+      stage.scrollLeft = dragStartScrollLeft - deltaX;
+      stage.scrollTop = dragStartScrollTop - deltaY;
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      stage.classList.remove('dragging');
+    });
 
     loadFromMarkdown(defaultMarkdownPath);
   </script>

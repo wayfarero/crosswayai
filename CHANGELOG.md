@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1
+
+- Added mouse zoom in/out and drag functionality in the CrossWayAI viewer
+
 ## 1.6.0
 
 - Added support for `Inheritance Diagram` via new explorer and editor context menu
