@@ -11,13 +11,14 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Impact Analysis
     - Include Diagram
     - Interface Diagram
+    - Interface Diagram
     - Call Diagram
+    - Table Relations Diagram
 
 ## Requirements
 
 - Progress OpenEdge installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension
-- [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram) VS Code extension
 
 
 ## Getting Started
@@ -40,16 +41,20 @@ The following commands are available in the Command Palette and via context menu
 -   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
 -   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
--   `Table Relations`: Generate the selected .df file's tables relations diagram using @mermAId chat agent
--   `Send to @mermaid`: Generate a diagram based on a @mermaid chat agent prompt
--   `View diagram`: Open the local Mermaid viewer for the selected or active markdown file, or prompt you to choose a `.md` file from the workspace
+-   `Table Relations Diagram`: Generate the selected .df file's tables relations diagram using chat agent
+-   `View diagram`: Open the CrossWayAI viewer for the selected .md file
 
 ## Release Notes
+
+### 1.6.2
+
+- Added mouse click highlight arrow functionality in the CrossWayAI viewer
+- dropped dependecy towards [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram) VS Code extension, replacing it's intended use with standard chat prompt for `Table Relations Diagram` command
+- dropped the `Send to @mermAId` command as no longer needed
 
 ### 1.6.1
 
 - Added mouse zoom in/out and drag functionality in the CrossWayAI viewer
-
 
 ### 1.6.0
 

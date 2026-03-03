@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2
+
+- Added mouse click highlight arrow functionality in the CrossWayAI viewer
+- dropped dependecy towards [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram) VS Code extension, replacing it's intended use with standard chat prompt for `Table Relations Diagram` command
+- dropped the `Send to @mermAId` command as no longer needed
+
 ## 1.6.1
 
 - Added mouse zoom in/out and drag functionality in the CrossWayAI viewer

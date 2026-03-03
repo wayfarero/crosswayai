@@ -147,6 +147,7 @@
       }
 
       fitDiagramToViewport();
+      activateDiagramInteractivity();
     }
 
     function centerStageScroll() {
@@ -179,6 +180,120 @@
       const availableHeight = Math.max(120, stage.clientHeight - 36);
       const fitZoom = Math.min(availableWidth / svgBaseWidth, availableHeight / svgBaseHeight);
       applyZoom(fitZoom, true);
+    }
+
+    function activateDiagramInteractivity() {
+      const svg = diagram.querySelector('svg');
+      if (!svg) return;
+
+      const HIGHLIGHT_COLOR = '#FF6B6B';
+      const HIGHLIGHT_BOX_PADDING = 8;
+      const clickedArrows = new Map();
+      const CLICK_TOLERANCE = 30; // Pixels - increase hit detection area
+
+      // Find all edge paths (Mermaid uses path elements for edges)
+      const allPaths = svg.querySelectorAll('path');
+      
+      allPaths.forEach((path) => {
+        // Skip paths in defs (markers, etc.)
+        if (path.closest('defs')) {
+          return;
+        }
+
+        const pathId = path.id;
+        const pathClass = path.getAttribute('class') || '';
+        
+        // Only target edge paths (Mermaid edge paths have specific patterns)
+        // Skip paths that are part of node shapes or backgrounds
+        if (!pathClass.includes('edge') && !pathId.includes('L-') && !path.getAttribute('marker-end')) {
+          return;
+        }
+
+        path.style.cursor = 'pointer';
+
+        // Create an invisible thicker path for better click detection (tolerance)
+        const invisiblePath = path.cloneNode(true);
+        invisiblePath.setAttribute('stroke', 'transparent');
+        invisiblePath.setAttribute('stroke-width', CLICK_TOLERANCE);
+        invisiblePath.setAttribute('fill', 'none');
+        invisiblePath.setAttribute('pointer-events', 'auto');
+        invisiblePath.setAttribute('class', (invisiblePath.getAttribute('class') || '') + ' invisible-click-area');
+        invisiblePath.style.cursor = 'pointer';
+        
+        // Insert the invisible path right after the original
+        path.parentNode.insertBefore(invisiblePath, path.nextSibling);
+
+        // Add click handler to invisible path
+        invisiblePath.addEventListener('click', (event) => {
+          event.stopPropagation();
+          event.preventDefault();
+
+          if (clickedArrows.has(pathId)) {
+            // Toggle off
+            removeArrowHighlight(pathId, svg, path);
+            clickedArrows.delete(pathId);
+          } else {
+            // Toggle on
+            highlightArrow(path, pathId, HIGHLIGHT_COLOR, svg);
+            clickedArrows.set(pathId, HIGHLIGHT_COLOR);
+          }
+        });
+      });
+
+      function highlightArrow(pathElement, pathId, color, svgElement) {
+        const originalStroke = pathElement.getAttribute('stroke') || '#000';
+        const originalStrokeWidth = pathElement.getAttribute('stroke-width') || '2';
+
+        // Store original values for reset
+        pathElement.dataset.originalStroke = originalStroke;
+        pathElement.dataset.originalStrokeWidth = originalStrokeWidth;
+        pathElement.dataset.isHighlighted = 'true';
+
+        // Change the arrow itself to red and thicker
+        pathElement.setAttribute('stroke', color);
+        pathElement.setAttribute('stroke-width', '4');
+
+        // Find and highlight connected nodes
+        const allGroups = svgElement.querySelectorAll('g[id*="node-"]');
+        allGroups.forEach((group) => {
+          const rect = group.querySelector('rect');
+          if (rect) {
+            // Add colored border/highlight boxes
+            const highlightBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            const x = parseFloat(rect.getAttribute('x'));
+            const y = parseFloat(rect.getAttribute('y'));
+            const width = parseFloat(rect.getAttribute('width'));
+            const height = parseFloat(rect.getAttribute('height'));
+
+            highlightBox.setAttribute('x', x - HIGHLIGHT_BOX_PADDING);
+            highlightBox.setAttribute('y', y - HIGHLIGHT_BOX_PADDING);
+            highlightBox.setAttribute('width', width + (HIGHLIGHT_BOX_PADDING * 2));
+            highlightBox.setAttribute('height', height + (HIGHLIGHT_BOX_PADDING * 2));
+            highlightBox.setAttribute('fill', 'none');
+            highlightBox.setAttribute('stroke', color);
+            highlightBox.setAttribute('stroke-width', '2');
+            highlightBox.setAttribute('stroke-dasharray', '5,5');
+            highlightBox.setAttribute('rx', '4');
+            highlightBox.setAttribute('class', `highlight-box-${pathId}`);
+            highlightBox.style.pointerEvents = 'none';
+
+            group.appendChild(highlightBox);
+          }
+        });
+      }
+
+      function removeArrowHighlight(pathId, svgElement, pathElement) {
+        if (pathElement && pathElement.dataset.isHighlighted === 'true') {
+          // Restore original stroke and width
+          pathElement.setAttribute('stroke', pathElement.dataset.originalStroke);
+          pathElement.setAttribute('stroke-width', pathElement.dataset.originalStrokeWidth);
+          pathElement.dataset.isHighlighted = 'false';
+
+          // Remove highlight boxes
+          const highlightBoxes = svgElement.querySelectorAll(`.highlight-box-${pathId}`);
+          highlightBoxes.forEach((box) => box.remove());
+        }
+      }
     }
 
     async function renderDiagram(code) {
@@ -414,6 +529,11 @@
     let dragStartScrollTop = 0;
 
     stage.addEventListener('mousedown', (event) => {
+      // Don't start dragging if clicking on an SVG path (arrow) or text element
+      if (event.target.tagName === 'path' || event.target.tagName === 'text' || event.target.tagName === 'tspan') {
+        return;
+      }
+
       isDragging = true;
       dragStartX = event.clientX;
       dragStartY = event.clientY;

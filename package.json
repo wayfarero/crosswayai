@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.6.1",
+    "version": "1.6.2",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",
@@ -47,8 +47,7 @@
             "onCommand:crosswayai.generateInterfaceDiagram",
             "onCommand:crosswayai.generateCallDiagram",
             "onCommand:crosswayai.generateInheritanceDiagram",
-            "onCommand:crosswayai.sendToMermaid",
-            "onCommand:crosswayai.openMermaidViewer",
+            "onCommand:crosswayai.openCrosswayAIViewer",
             "onCommand:crosswayai.dumpAllDBDefinitions",
             "onCommand:crosswayai.generateTableRelationsDiagram"
         ],
@@ -89,11 +88,7 @@
                 "title": "Inheritance Diagram"
             },
             {
-                "command": "crosswayai.sendToMermaid",
-                "title": "Send to @mermaid"
-            },
-            {
-                "command": "crosswayai.openMermaidViewer",
+                "command": "crosswayai.openCrosswayAIViewer",
                 "title": "View diagram"
             },
             {
@@ -140,12 +135,8 @@
                     "when": "resourceExtname =~ /^\\.(cls|CLS)$/",
                     "group": "navigation"
                 },
-                {   "command": "crosswayai.sendToMermaid",
-                    "when": "resourcePath =~ /[\\\\\\/]resources[\\\\\\/]mermaid_prompts[\\\\\/].+/",
-                    "group": "navigation"
-                },
                 {
-                    "command": "crosswayai.openMermaidViewer",
+                    "command": "crosswayai.openCrosswayAIViewer",
                     "when": "resourceExtname =~ /^\\.(md|MD)$/",
                     "group": "navigation"
                 },
@@ -158,8 +149,7 @@
         }
     },
     "extensionDependencies": [
-        "riversidesoftware.openedge-abl-lsp",
-        "ms-vscode.copilot-mermaid-diagram"
+        "riversidesoftware.openedge-abl-lsp"
     ],
     "dependencies": {}
 }

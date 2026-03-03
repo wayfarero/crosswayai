@@ -8,13 +8,12 @@ const { generateImpactDiagram } = require('./impactDiagram');
 const { generateInterfaceDiagram } = require('./interfaceDiagram');
 const { generateCallDiagram } = require('./callDiagram');
 const { generateInheritanceDiagram } = require('./inheritanceDiagram');
-const { sendToMermaid } = require('./sendToMermaid');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
-const { openMermaidViewer, deactivateMermaidViewer, persistMermaid } = createMermaidViewer({
+const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid } = createMermaidViewer({
     vscode,
     fs,
     path,
@@ -33,7 +32,7 @@ function activate(context) {
         fs,
         path,
         CrossWayAILog,
-        openMermaidViewer,
+        openCrosswayAIViewer,
         persistMermaid,
         getDsMapArray
     });
@@ -51,7 +50,6 @@ function activate(context) {
     const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
     const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
     const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
-    const handleSendToMermaid = (ctx, uri) => sendToMermaid(ctx, uri, { vscode, fs });
     const getDumpDfFileDeps = () => ({
         vscode,
         fs,
@@ -72,15 +70,25 @@ function activate(context) {
             // Get the filename without extension (database name)
             const fileName = path.basename(uri.fsPath, path.extname(uri.fsPath));
             
+            // Get workspace root
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                vscode.window.showErrorMessage('No workspace folder found');
+                return;
+            }
+            const workspaceRoot = workspaceFolders[0].uri.fsPath;
+            
             // Read the template file
             const templatePath = path.join(ctx.extensionPath, 'resources', 'mermaid_prompts', '@mermaid_table_relations');
             const templateContent = fs.readFileSync(templatePath, 'utf8');
             
-            // Replace <databasename> with actual database name
-            const prompt = templateContent.replace(/<databasename>/g, fileName);
+            // Replace <databasename> and <workspaceRoot> with actual values
+            const prompt = templateContent
+                .replace(/<databasename>/g, fileName)
+                .replace(/<workspaceRoot>/g, workspaceRoot);
             
             // Open chat and pre-fill it with the prompt
-            await vscode.commands.executeCommand('workbench.action.chat.open', { query: `@mermaid\n${prompt}` });
+            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
         } catch (error) {
             vscode.window.showErrorMessage(`Error processing table relations: ${error.message}`);
         }
@@ -93,8 +101,7 @@ function activate(context) {
         { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram },
         { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram },
         { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram },
-        { name: 'crosswayai.sendToMermaid', handler: handleSendToMermaid },
-        { name: 'crosswayai.openMermaidViewer', handler: openMermaidViewer },
+        { name: 'crosswayai.openCrosswayAIViewer', handler: openCrosswayAIViewer },
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
         { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram }

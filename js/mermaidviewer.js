@@ -398,7 +398,7 @@ function createMermaidViewer(deps) {
         return mermaidServerPort;
     }
 
-    async function openMermaidViewer(context, uri) {
+    async function openCrosswayAIViewer(context, uri) {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
             vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
@@ -495,7 +495,7 @@ function createMermaidViewer(deps) {
     }
 
     return {
-        openMermaidViewer,
+        openCrosswayAIViewer,
         deactivateMermaidViewer,
         persistMermaid
     };

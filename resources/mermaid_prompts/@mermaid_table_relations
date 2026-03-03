@@ -1,2 +1,4 @@
-@mermaid (regenerate even if output file present) table relationships from .crosswayai/dump/<databasename>.df output to /crosswayai/mermaid/table_relations_<databasename>.md 
+(regenerate even if output file present) table relationships from <workspaceRoot>\\.crosswayai\dump\<databasename>.df,
+output to <workspaceRoot>\\.crosswayai\mermaid\table_relations_<databasename>.md, 
+label table relation arrows with type of relation(1-1, 1-n, etc)
 

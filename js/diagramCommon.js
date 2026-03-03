@@ -150,7 +150,7 @@ function getDiagramConfig(diagramType) {
 }
 
 async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
-    const { vscode, CrossWayAILog, openMermaidViewer, persistMermaid, getDsMapArray } = deps;
+    const { vscode, CrossWayAILog, openCrosswayAIViewer, persistMermaid, getDsMapArray } = deps;
     const config = getDiagramConfig(diagramType);
 
     try {
@@ -168,7 +168,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
 
         const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, targetNode.FileName, mermaidGraph);
         if (savedPath) {
-            await openMermaidViewer(context, vscode.Uri.file(savedPath));
+            await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
             vscode.window.showInformationMessage(`Mermaid diagram saved: ${savedPath}`);
         }
     } catch (error) {
