@@ -1,4 +1,4 @@
-const { generateDiagram } = require('./diagramCommon');
+const { generateDiagram, createMermaidGraphWriter } = require('./diagramCommon');
 
 async function generateInterfaceDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'interface', generateMermaidInterfaceGraph);
@@ -94,47 +94,19 @@ function generateMermaidInterfaceGraph(dsMap, targetNode, deps, graphType = 'LR'
 
     const hasOutgoingLinks = Array.from(linksToRender).some(link => link.ParentNodeId === startNodeId);
     const hasIncomingLinks = Array.from(linksToRender).some(link => link.NodeId === startNodeId);
+    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
+    const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
-    let mermaidGraph = `graph ${graphType};\n`;
-    const declaredNodes = new Set();
-
-    function getMermaidNodeId(fileName) {
-        return String(fileName || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
-    }
-
-    function getMermaidNodeLabel(fileName) {
-        return String(fileName || 'unknown').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    }
-
-    function ensureNodeDeclaration(node) {
-        if (!node || !node.FileName) {
-            return null;
-        }
-
-        const nodeId = getMermaidNodeId(node.FileName);
-        if (!declaredNodes.has(nodeId)) {
-            const nodeLabel = getMermaidNodeLabel(node.FileName);
-            mermaidGraph += `    ${nodeId}["${nodeLabel}"]\n`;
-            declaredNodes.add(nodeId);
-        }
-
-        return nodeId;
-    }
-
-    const startNodeName = ensureNodeDeclaration(targetNode);
-    mermaidGraph += `    style ${startNodeName} fill:#ff9,stroke:#333,stroke-width:4px\n`;
-
-    // When the starting class neither implements any other class nor is implemented by any other class,
-    // the Interface Diagram should display only the class itself.
     if (!hasOutgoingLinks && !hasIncomingLinks) {
-        return mermaidGraph;
+        return getGraph();
     }
 
-    // Deduplicate links by (parent,node,linkType) key to avoid rendering duplicates from mixed sources
     const deduped = [];
     const seen = new Set();
+
     Array.from(linksToRender).forEach(link => {
         const key = `${link.ParentNodeId}::${link.NodeId}::${(link.LinkType || '').toString()}`;
+
         if (!seen.has(key)) {
             seen.add(key);
             deduped.push(link);
@@ -142,20 +114,28 @@ function generateMermaidInterfaceGraph(dsMap, targetNode, deps, graphType = 'LR'
     });
 
     deduped.forEach(link => {
+
         const sourceNode = allFileNodes.find(f => f.NodeId === link.ParentNodeId);
         const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
 
-        if (sourceNode && destNode) {
-            const sourceName = ensureNodeDeclaration(sourceNode);
-            const destName = ensureNodeDeclaration(destNode);
-            // Emit source --> dest; in graph BT, dest (interface for interface links) renders above
-            mermaidGraph += `    ${sourceName} --> ${destName};\n`;
+        if (!sourceNode || !destNode) {
+            return;
         }
+
+        ensureNodeDeclaration(sourceNode);
+        ensureNodeDeclaration(destNode);
+
+        let label = '';
+
+        if (typeof link.LinkType === 'string') {
+            label = link.LinkType.split(':')[0].trim();
+        }
+
+        addEdge(sourceNode, destNode);
     });
 
-    return mermaidGraph;
+    return getGraph();
 }
-
 module.exports = {
     generateInterfaceDiagram
 };

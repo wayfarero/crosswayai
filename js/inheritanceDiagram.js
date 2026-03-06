@@ -85,6 +85,7 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'B
     const hasOutgoingLinks = Array.from(linksToRender).some(link => link.ParentNodeId === startNodeId);
     const hasIncomingLinks = Array.from(linksToRender).some(link => link.NodeId === startNodeId);
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
+    const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
     // When the starting class neither extends any other class nor is extended by any other class,
     // the Inheritance Diagram should display only the class itself.
@@ -92,7 +93,6 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'B
         return graphWriter.getGraph();
     }
 
-    const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
     const renderedEdges = new Set();
 
     // Deduplicate links by (parent,node,linkType) key to avoid rendering duplicates from mixed sources
@@ -107,17 +107,30 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'B
     });
 
     deduped.forEach(link => {
+
         const sourceNode = allFileNodes.find(f => f.NodeId === link.ParentNodeId);
         const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
 
-        if (sourceNode && destNode) {
-            const sourceName = ensureNodeDeclaration(sourceNode);
-            const destName = ensureNodeDeclaration(destNode);
-            const edgeKey = `${sourceName}->${destName}`;
-            if (!renderedEdges.has(edgeKey)) {
-                addEdge(sourceName, destName);
-                renderedEdges.add(edgeKey);
+        if (!sourceNode || !destNode) {
+            return;
+        }
+
+        ensureNodeDeclaration(sourceNode);
+        ensureNodeDeclaration(destNode);
+
+        const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
+
+        if (!renderedEdges.has(edgeKey)) {
+
+            let label = '';
+
+            if (typeof link.LinkType === 'string') {
+                label = link.LinkType.split(':')[0].trim();
             }
+
+            addEdge(sourceNode, destNode);
+
+            renderedEdges.add(edgeKey);
         }
     });
 

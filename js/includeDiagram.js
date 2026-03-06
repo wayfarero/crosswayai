@@ -58,11 +58,11 @@ function generateMermaidIncludeGraph(dsMap, targetNode, deps, graphType = 'TD') 
         const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
 
         if (sourceNode && destNode) {
-            const sourceName = ensureNodeDeclaration(sourceNode);
-            const destName = ensureNodeDeclaration(destNode);
-            const edgeKey = `${sourceName}->${destName}`;
+            ensureNodeDeclaration(sourceNode);
+            ensureNodeDeclaration(destNode);
+            const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
             if (!renderedEdges.has(edgeKey)) {
-                addEdge(sourceName, destName);
+                addEdge(sourceNode, destNode);
                 renderedEdges.add(edgeKey);
             }
         }

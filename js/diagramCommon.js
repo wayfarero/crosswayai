@@ -179,45 +179,172 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
 }
 
 function createMermaidGraphWriter(targetNode, graphType = 'LR') {
+    
+    let edgeCounter = 0;
+
+    const NODE_BORDER_COLORS = {
+        class: "#006400",
+        include: "#b00060",
+        procedure: "#0033cc",
+        screen: "#b59b00"
+    };
+
     let mermaidGraph = `graph ${graphType};\n`;
+
     const declaredNodes = new Set();
 
     function getMermaidNodeId(fileName) {
         return String(fileName || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
     }
 
-    function getMermaidNodeLabel(fileName) {
-        return String(fileName || 'unknown').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    function getNodePrefix(node) {
+        return node.FileDesc ? node.FileDesc.trim() : '';
+    }
+
+    function buildNodeLabel(node) {
+        const prefix = getNodePrefix(node);
+        const firstLine = prefix ? `${prefix}${node.FileName}` : node.FileName;
+        const relPath = node.FileRelPath || '';
+
+        let displayPath = '';
+
+        if (relPath) {
+            const lastSep = relPath.lastIndexOf('\\');
+            const folderPath = lastSep !== -1 ? relPath.substring(0, lastSep) : relPath;
+
+            if (folderPath) {
+                displayPath = `(${folderPath})`;
+            }
+        }
+
+        const escapedFirst = firstLine.replace(/"/g, '\\"');
+        const escapedRel = displayPath.replace(/"/g, '\\"');
+
+        if (escapedRel) {
+            return `${escapedFirst}\\n${escapedRel}`;
+        }
+
+        return escapedFirst;
+    }
+
+    function resolveNodeType(node) {
+
+        if (!node || !node.FileName) {
+            return "class";
+        }
+
+        const prefix = getNodePrefix(node);
+
+        const ext = node.FileName.includes('.')
+            ? node.FileName.split('.').pop().toLowerCase()
+            : "";
+
+        if (prefix.startsWith('CLASS') || ext === 'cls') {
+            return "class";
+        }
+
+        if (prefix.startsWith('INCLUDE') || ext === 'i') {
+            return "include";
+        }
+
+        if (prefix.startsWith('PROCEDURE') || ext === 'p') {
+            return "procedure";
+        }
+
+        if (prefix.startsWith('SCREEN') || ext === 'w') {
+            return "screen";
+        }
+
+        return "class";
+    }
+
+    function writeNode(nodeId, label, nodeType) {
+
+        const borderColor = NODE_BORDER_COLORS[nodeType] || "#333";
+
+        mermaidGraph += `    ${nodeId}["${label}"]\n`;
+
+        mermaidGraph +=
+            `    style ${nodeId} fill:#ffffff,stroke:${borderColor},stroke-width:2px,rx:5px,ry:5px\n`;
     }
 
     function ensureNodeDeclaration(node) {
+
         if (!node || !node.FileName) {
             return null;
         }
 
         const nodeId = getMermaidNodeId(node.FileName);
+
         if (!declaredNodes.has(nodeId)) {
-            const nodeLabel = getMermaidNodeLabel(node.FileName);
-            mermaidGraph += `    ${nodeId}["${nodeLabel}"]\n`;
+
+            const label = buildNodeLabel(node);
+            const nodeType = resolveNodeType(node);
+
+            writeNode(nodeId, label, nodeType);
+
             declaredNodes.add(nodeId);
         }
 
         return nodeId;
     }
 
-    const startNodeName = ensureNodeDeclaration(targetNode);
-    mermaidGraph += `    style ${startNodeName} fill:#f9f,stroke:#333,stroke-width:4px\n`;
+    function resolveEdgeColor(sourceType) {
 
-    function addEdge(sourceName, destName, label) {
-        if (!sourceName || !destName) {
+        return NODE_BORDER_COLORS[sourceType] || "#333";
+    }
+
+    function lightenColor(hex, percent) {
+
+        const num = parseInt(hex.replace("#",""),16);
+
+        let r = (num >> 16);
+        let g = (num >> 8) & 255;
+        let b = num & 255;
+
+        r = Math.min(255, Math.floor(r + (255 - r) * percent));
+        g = Math.min(255, Math.floor(g + (255 - g) * percent));
+        b = Math.min(255, Math.floor(b + (255 - b) * percent));
+
+        return "#" + (r << 16 | g << 8 | b).toString(16).padStart(6,"0");
+    }
+
+    const startNodeName = ensureNodeDeclaration(targetNode);
+    const startNodeType = resolveNodeType(targetNode);
+    const startBorder = NODE_BORDER_COLORS[startNodeType] || "#333";
+
+    mermaidGraph +=
+    `    style ${startNodeName} fill:#1f6feb,stroke:${startBorder},stroke-width:4px,color:#ffffff,rx:5px,ry:5px\n`;    
+
+    function addEdge(sourceNode, destNode, label) {
+
+        if (!sourceNode || !destNode) {
             return;
         }
 
-        if (label) {
-            mermaidGraph += `    ${sourceName} -- ${label} --> ${destName};\n`;
-        } else {
-            mermaidGraph += `    ${sourceName} --> ${destName};\n`;
+        if (!sourceNode.FileName || !destNode.FileName) {
+            return;
         }
+
+        const sourceId = getMermaidNodeId(sourceNode.FileName);
+        const destId = getMermaidNodeId(destNode.FileName);
+
+        const sourceType = resolveNodeType(sourceNode);
+        const targetType = resolveNodeType(destNode);
+
+        const color = resolveEdgeColor(targetType);
+
+        const safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
+
+        if (safeLabel) {
+            mermaidGraph += `    ${sourceId} -->|${safeLabel}| ${destId};\n`;
+        } else {
+            mermaidGraph += `    ${sourceId} --> ${destId};\n`;
+        }
+        
+        mermaidGraph += `    linkStyle ${edgeCounter} stroke:${color},stroke-width:2px\n`;
+        
+        edgeCounter++;
     }
 
     function getGraph() {
@@ -230,7 +357,6 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         getGraph
     };
 }
-
 module.exports = {
     resolveDiagramContext,
     createMermaidGraphWriter,

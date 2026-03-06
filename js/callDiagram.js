@@ -67,13 +67,14 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
         const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
 
         if (sourceNode && destNode) {
-            const sourceName = ensureNodeDeclaration(sourceNode);
-            const destName = ensureNodeDeclaration(destNode);
+            ensureNodeDeclaration(sourceNode);
+            ensureNodeDeclaration(destNode);
+
             const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
             if (!edges.has(edgeKey)) {
                 edges.set(edgeKey, {
-                    sourceName,
-                    destName,
+                    sourceNode,
+                    destNode,
                     labels: new Set()
                 });
             }
@@ -96,10 +97,12 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
         }
     });
 
-    edges.forEach(edge => {
-        const labels = Array.from(edge.labels).join(', ');
-        addEdge(edge.sourceName, edge.destName, labels);
-    });
+    Array.from(edges.entries())
+        .sort((a,b) => a[0].localeCompare(b[0]))
+        .forEach(([key, edge]) => {
+            const labels = Array.from(edge.labels).join(', ');
+            addEdge(edge.sourceNode, edge.destNode, labels);
+        });
 
     return getGraph();
 }

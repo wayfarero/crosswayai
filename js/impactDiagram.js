@@ -91,13 +91,14 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
         const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
 
         if (sourceNode && destNode) {
-            const sourceName = ensureNodeDeclaration(sourceNode);
-            const destName = ensureNodeDeclaration(destNode);
+            ensureNodeDeclaration(sourceNode);
+            ensureNodeDeclaration(destNode);
+
             const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
             if (!edges.has(edgeKey)) {
                 edges.set(edgeKey, {
-                    sourceName,
-                    destName,
+                    sourceNode,
+                    destNode,
                     labels: new Set()
                 });
             }
@@ -128,7 +129,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
 
     sortedEntries.forEach(([key, edge]) => {
         const labels = Array.from(edge.labels).join(', ');
-        addEdge(edge.sourceName, edge.destName, labels);
+        addEdge(edge.sourceNode, edge.destNode, labels);
 
         if (bidirectional.has(key)) {
             // mark this edge red using mermaid's linkStyle syntax

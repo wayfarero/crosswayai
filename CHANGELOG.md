@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.4
+
+- Refactored code diagram generation commands with enhanced node and link visibility:
+  - Added colored node borders that differentiate by node type
+  - Implemented colored arrows that differentiate by link type for better visual clarity
+  - Updated node labels to display the relative path of the node
+
 ## 1.6.3
 
 - Bug fixes in CrossWayAI Viewer link highlight functionality
