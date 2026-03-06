@@ -113,7 +113,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      deterministicIds: true,
+      er: {
+        layoutDirection: 'LR'
+      }
+    });
 
     const status = document.getElementById('status');
     const stage = document.getElementById('stage');
@@ -186,57 +194,122 @@
       const svg = diagram.querySelector('svg');
       if (!svg) return;
 
-      const HIGHLIGHT_COLOR = '#FF6B6B';
-      const HIGHLIGHT_BOX_PADDING = 8;
-      const clickedArrows = new Map();
-      const CLICK_TOLERANCE = 30; // Pixels - increase hit detection area
+      const HIGHLIGHT_COLOR = '#DC2626';
+      const CLICK_TOLERANCE = 24;
+      let activeSelection = null;
 
-      // Find all edge paths (Mermaid uses path elements for edges)
-      const allPaths = svg.querySelectorAll('path');
-      
-      allPaths.forEach((path) => {
-        // Skip paths in defs (markers, etc.)
-        if (path.closest('defs')) {
+      function isDiagramEdgeElement(edgeEl) {
+        if (!edgeEl) {
+          return false;
+        }
+        const tagName = (edgeEl.tagName || '').toLowerCase();
+        if (!['path', 'line', 'polyline'].includes(tagName)) {
+          return false;
+        }
+        if (edgeEl.closest('defs')) {
+          return false;
+        }
+        const markerStart = edgeEl.getAttribute('marker-start');
+        const markerEnd = edgeEl.getAttribute('marker-end');
+        const edgeClass = edgeEl.getAttribute('class') || '';
+        const edgeId = edgeEl.id || '';
+        if (markerStart || markerEnd) {
+          return true;
+        }
+        return /(^|\s)(edge|edgePath|relation|relationshipLine)(\s|$)/i.test(edgeClass) || edgeId.includes('L-');
+      }
+
+      function clearActiveSelection() {
+        if (!activeSelection) {
+          return;
+        }
+        const { pathElement, originalStroke, originalStrokeWidth, originalStyleStroke, originalStyleStrokeWidth } = activeSelection;
+        if (pathElement && pathElement.isConnected) {
+          if (originalStroke === null) {
+            pathElement.removeAttribute('stroke');
+          } else {
+            pathElement.setAttribute('stroke', originalStroke);
+          }
+          if (originalStrokeWidth === null) {
+            pathElement.removeAttribute('stroke-width');
+          } else {
+            pathElement.setAttribute('stroke-width', originalStrokeWidth);
+          }
+          if (originalStyleStroke === null) {
+            pathElement.style.removeProperty('stroke');
+          } else {
+            pathElement.style.stroke = originalStyleStroke;
+          }
+          if (originalStyleStrokeWidth === null) {
+            pathElement.style.removeProperty('stroke-width');
+          } else {
+            pathElement.style.strokeWidth = originalStyleStrokeWidth;
+          }
+        }
+        activeSelection = null;
+      }
+
+      function highlightEdge(edgeEl) {
+        clearActiveSelection();
+
+        const originalStroke = edgeEl.hasAttribute('stroke') ? edgeEl.getAttribute('stroke') : null;
+        const originalStrokeWidth = edgeEl.hasAttribute('stroke-width') ? edgeEl.getAttribute('stroke-width') : null;
+        const originalStyleStroke = edgeEl.style.stroke || null;
+        const originalStyleStrokeWidth = edgeEl.style.strokeWidth || null;
+
+        edgeEl.setAttribute('stroke', HIGHLIGHT_COLOR);
+        edgeEl.style.stroke = HIGHLIGHT_COLOR;
+
+        activeSelection = {
+          pathElement: edgeEl,
+          originalStroke,
+          originalStrokeWidth,
+          originalStyleStroke,
+          originalStyleStrokeWidth
+        };
+      }
+
+      function createClickTargetForEdge(edgeEl) {
+        const tagName = (edgeEl.tagName || '').toLowerCase();
+        const clickTarget = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+        if (tagName === 'path') {
+          clickTarget.setAttribute('d', edgeEl.getAttribute('d') || '');
+        } else if (tagName === 'line') {
+          clickTarget.setAttribute('x1', edgeEl.getAttribute('x1') || '0');
+          clickTarget.setAttribute('y1', edgeEl.getAttribute('y1') || '0');
+          clickTarget.setAttribute('x2', edgeEl.getAttribute('x2') || '0');
+          clickTarget.setAttribute('y2', edgeEl.getAttribute('y2') || '0');
+        } else if (tagName === 'polyline') {
+          clickTarget.setAttribute('points', edgeEl.getAttribute('points') || '');
+        }
+        clickTarget.setAttribute('fill', 'none');
+        clickTarget.setAttribute('stroke', 'transparent');
+        clickTarget.setAttribute('stroke-width', String(CLICK_TOLERANCE));
+        clickTarget.setAttribute('pointer-events', 'stroke');
+        clickTarget.setAttribute('class', 'crosswayai-click-target');
+        clickTarget.style.cursor = 'pointer';
+        return clickTarget;
+      }
+
+      const allEdges = svg.querySelectorAll('path, line, polyline');
+      allEdges.forEach((edgeEl) => {
+        if (!isDiagramEdgeElement(edgeEl)) {
           return;
         }
 
-        const pathId = path.id;
-        const pathClass = path.getAttribute('class') || '';
-        
-        // Only target edge paths (Mermaid edge paths have specific patterns)
-        // Skip paths that are part of node shapes or backgrounds
-        if (!pathClass.includes('edge') && !pathId.includes('L-') && !path.getAttribute('marker-end')) {
-          return;
-        }
+        edgeEl.style.cursor = 'pointer';
+        const clickTarget = createClickTargetForEdge(edgeEl);
+        edgeEl.parentNode.insertBefore(clickTarget, edgeEl.nextSibling);
 
-        path.style.cursor = 'pointer';
-
-        // Create an invisible thicker path for better click detection (tolerance)
-        const invisiblePath = path.cloneNode(true);
-        invisiblePath.setAttribute('stroke', 'transparent');
-        invisiblePath.setAttribute('stroke-width', CLICK_TOLERANCE);
-        invisiblePath.setAttribute('fill', 'none');
-        invisiblePath.setAttribute('pointer-events', 'auto');
-        invisiblePath.setAttribute('class', (invisiblePath.getAttribute('class') || '') + ' invisible-click-area');
-        invisiblePath.style.cursor = 'pointer';
-        
-        // Insert the invisible path right after the original
-        path.parentNode.insertBefore(invisiblePath, path.nextSibling);
-
-        // Add click handler to invisible path
-        invisiblePath.addEventListener('click', (event) => {
+        clickTarget.addEventListener('click', (event) => {
           event.stopPropagation();
           event.preventDefault();
 
-          if (clickedArrows.has(pathId)) {
-            // Toggle off
-            removeArrowHighlight(pathId, svg, path);
-            clickedArrows.delete(pathId);
-          } else {
-            // Toggle on
-            highlightArrow(path, pathId, HIGHLIGHT_COLOR, svg);
-            clickedArrows.set(pathId, HIGHLIGHT_COLOR);
+          if (activeSelection && activeSelection.pathElement === edgeEl) {
+            clearActiveSelection();
+            return;
           }
+          highlightEdge(edgeEl);
         });
       });
 
@@ -252,6 +325,20 @@
         // Change the arrow itself to red and thicker
         pathElement.setAttribute('stroke', color);
         pathElement.setAttribute('stroke-width', '4');
+
+        const overlayLayer = createOrGetOverlayLayer(svgElement);
+        if (overlayLayer) {
+          const overlayPath = pathElement.cloneNode(true);
+          const safePathId = String(pathId || 'path').replace(/[^a-zA-Z0-9_-]/g, '_');
+          const overlayId = `highlight-overlay-${safePathId}-${Date.now()}`;
+          overlayPath.setAttribute('id', overlayId);
+          overlayPath.setAttribute('stroke', color);
+          overlayPath.setAttribute('stroke-width', '4');
+          overlayPath.setAttribute('fill', 'none');
+          overlayPath.style.pointerEvents = 'none';
+          overlayLayer.appendChild(overlayPath);
+          pathElement.dataset.highlightOverlayId = overlayId;
+        }
 
         // Find and highlight connected nodes
         const allGroups = svgElement.querySelectorAll('g[id*="node-"]');
@@ -289,15 +376,404 @@
           pathElement.setAttribute('stroke-width', pathElement.dataset.originalStrokeWidth);
           pathElement.dataset.isHighlighted = 'false';
 
+          const overlayId = pathElement.dataset.highlightOverlayId;
+          if (overlayId) {
+            const overlayPath = svgElement.querySelector(`[id="${overlayId}"]`);
+            if (overlayPath) {
+              overlayPath.remove();
+            }
+            delete pathElement.dataset.highlightOverlayId;
+          }
+
           // Remove highlight boxes
           const highlightBoxes = svgElement.querySelectorAll(`.highlight-box-${pathId}`);
           highlightBoxes.forEach((box) => box.remove());
         }
       }
+      svg.addEventListener('click', () => {
+        clearActiveSelection();
+      });
+    }
+
+    function normalizeErKeySyntax(code) {
+      return (code || '')
+        .replace(/\bPK[_/ ]FK\b/gi, 'PK, FK')
+        .replace(/\bFK[_/ ]PK\b/gi, 'FK, PK');
+    }
+
+    function createOrGetOverlayLayer(svg) {
+      if (!svg) {
+        return null;
+      }
+
+      let layer = svg.querySelector('#crosswayai-edge-overlay');
+      if (!layer) {
+        layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        layer.setAttribute('id', 'crosswayai-edge-overlay');
+        layer.style.pointerEvents = 'none';
+        svg.appendChild(layer);
+      } else if (layer.parentNode !== svg) {
+        svg.appendChild(layer);
+      }
+
+      return layer;
+    }
+
+    function bringRelationshipLayersToFront(svg) {
+      if (!svg) {
+        return;
+      }
+
+      const candidates = [
+        '.edgePaths',
+        '.edgeLabels',
+        '.relationships',
+        '.relationshipLine',
+        'g[class*="edge"]',
+        'g[class*="relationship"]',
+        'g[id*="edge"]',
+        'g[id*="rel"]'
+      ];
+      const moved = new Set();
+
+      for (const selector of candidates) {
+        const groups = svg.querySelectorAll(selector);
+        groups.forEach((group) => {
+          if (!group || !group.parentNode || moved.has(group)) {
+            return;
+          }
+          group.parentNode.appendChild(group);
+          moved.add(group);
+        });
+      }
+
+      const edgePaths = svg.querySelectorAll('path[marker-end], path[marker-start], path.relationshipLine');
+      edgePaths.forEach((path) => {
+        if (!path || !path.parentNode || path.closest('defs')) {
+          return;
+        }
+        path.parentNode.appendChild(path);
+      });
+
+      createOrGetOverlayLayer(svg);
+    }
+
+    function organizeErDiagram(code) {
+      const source = (code || '').replace(/\r\n/g, '\n');
+      const lines = source.split('\n');
+      const headerIndex = lines.findIndex((line) => /^\s*erDiagram\b/i.test(line));
+      if (headerIndex === -1) {
+        return code;
+      }
+
+      const entityBlocks = new Map();
+      const relationships = [];
+      const passthroughLines = [];
+      const entityDeclPattern = /^\s*([A-Za-z0-9_]+)\s*\{\s*$/;
+      const relationshipPattern = /^\s*([A-Za-z0-9_]+)\s+([^\s]+)\s+([A-Za-z0-9_]+)\s*:\s*(.+?)\s*$/;
+
+      for (let i = headerIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        const entityMatch = line.match(entityDeclPattern);
+        if (entityMatch) {
+          const entityName = entityMatch[1];
+          const blockLines = [line];
+          let closed = false;
+
+          for (i = i + 1; i < lines.length; i++) {
+            blockLines.push(lines[i]);
+            if (/^\s*}\s*$/.test(lines[i])) {
+              closed = true;
+              break;
+            }
+          }
+
+          if (!closed) {
+            return code;
+          }
+
+          entityBlocks.set(entityName, blockLines);
+          continue;
+        }
+
+        const relMatch = line.match(relationshipPattern);
+        if (relMatch && relMatch[2].includes('--')) {
+          relationships.push({
+            left: relMatch[1],
+            right: relMatch[3],
+            raw: trimmed
+          });
+          continue;
+        }
+
+        passthroughLines.push(trimmed);
+      }
+
+      if (entityBlocks.size < 2 || relationships.length === 0) {
+        return code;
+      }
+
+      const nodeSet = new Set(entityBlocks.keys());
+      const adjacency = new Map();
+      nodeSet.forEach((name) => adjacency.set(name, new Set()));
+      relationships.forEach((rel) => {
+        if (!nodeSet.has(rel.left) || !nodeSet.has(rel.right)) {
+          return;
+        }
+        adjacency.get(rel.left).add(rel.right);
+        adjacency.get(rel.right).add(rel.left);
+      });
+
+      const degree = (name) => (adjacency.get(name) ? adjacency.get(name).size : 0);
+      const nodes = Array.from(nodeSet).sort((a, b) => a.localeCompare(b));
+
+      const components = [];
+      const seen = new Set();
+      for (const node of nodes) {
+        if (seen.has(node)) continue;
+        const queue = [node];
+        seen.add(node);
+        const comp = [];
+        while (queue.length) {
+          const cur = queue.shift();
+          comp.push(cur);
+          const neighbors = Array.from(adjacency.get(cur) || []).sort((a, b) => a.localeCompare(b));
+          for (const next of neighbors) {
+            if (seen.has(next)) continue;
+            seen.add(next);
+            queue.push(next);
+          }
+        }
+        components.push(comp);
+      }
+
+      function buildComponentOrder(componentNodes) {
+        if (componentNodes.length <= 1) {
+          return componentNodes.slice();
+        }
+
+        const inComponent = new Set(componentNodes);
+        const compEdges = [];
+        for (const rel of relationships) {
+          if (inComponent.has(rel.left) && inComponent.has(rel.right)) {
+            compEdges.push([rel.left, rel.right]);
+          }
+        }
+
+        function orderIndexMap(currentOrder) {
+          return new Map(currentOrder.map((n, i) => [n, i]));
+        }
+
+        function edgeStats(currentOrder) {
+          const idx = orderIndexMap(currentOrder);
+          let edgeLength = 0;
+          let crossings = 0;
+          let sideCongestion = 0;
+          const sideCounts = new Map();
+
+          for (const nodeName of currentOrder) {
+            sideCounts.set(nodeName, { left: 0, right: 0 });
+          }
+
+          for (let i = 0; i < compEdges.length; i++) {
+            const [a1, b1] = compEdges[i];
+            const l1 = idx.get(a1);
+            const r1 = idx.get(b1);
+            const s1 = Math.min(l1, r1);
+            const e1 = Math.max(l1, r1);
+            edgeLength += (e1 - s1);
+
+            const leftNode = l1 < r1 ? a1 : b1;
+            const rightNode = l1 < r1 ? b1 : a1;
+            sideCounts.get(leftNode).right++;
+            sideCounts.get(rightNode).left++;
+
+            for (let j = i + 1; j < compEdges.length; j++) {
+              const [a2, b2] = compEdges[j];
+              const l2 = idx.get(a2);
+              const r2 = idx.get(b2);
+              const s2 = Math.min(l2, r2);
+              const e2 = Math.max(l2, r2);
+              const isCrossing = (s1 < s2 && s2 < e1 && e1 < e2) || (s2 < s1 && s1 < e2 && e2 < e1);
+              if (isCrossing) {
+                crossings++;
+              }
+            }
+          }
+
+          for (const counts of sideCounts.values()) {
+            const leftOverflow = Math.max(0, counts.left - 2);
+            const rightOverflow = Math.max(0, counts.right - 2);
+            sideCongestion += (leftOverflow * leftOverflow) + (rightOverflow * rightOverflow);
+          }
+
+          return { crossings, edgeLength, sideCongestion };
+        }
+
+        function score(currentOrder) {
+          const stats = edgeStats(currentOrder);
+          // Crossings dominate, then long edges, then same-side crowding near node borders.
+          return (stats.crossings * 200000) + (stats.edgeLength * 8) + (stats.sideCongestion * 500);
+        }
+
+        function buildBarycentricOrder(initialOrder, iterations = 12) {
+          let order = initialOrder.slice();
+          for (let iteration = 0; iteration < iterations; iteration++) {
+            const idx = orderIndexMap(order);
+            const scored = order.map((name) => {
+              const neighbors = Array.from(adjacency.get(name) || []).filter((n) => inComponent.has(n));
+              if (!neighbors.length) {
+                return { name, bary: idx.get(name), deg: degree(name) };
+              }
+              const avg = neighbors.reduce((sum, n) => sum + idx.get(n), 0) / neighbors.length;
+              return { name, bary: avg, deg: degree(name) };
+            });
+
+            scored.sort((a, b) => {
+              if (a.bary !== b.bary) return a.bary - b.bary;
+              if (b.deg !== a.deg) return b.deg - a.deg;
+              return a.name.localeCompare(b.name);
+            });
+            order = scored.map((s) => s.name);
+          }
+          return order;
+        }
+
+        function improveOrder(initialOrder) {
+          let order = initialOrder.slice();
+          let bestScore = score(order);
+          let improved = true;
+          let guard = 0;
+
+          while (improved && guard < 300) {
+            guard++;
+            improved = false;
+
+            // Adjacent swaps quickly remove many local crossings.
+            for (let i = 0; i < order.length - 1; i++) {
+              const candidate = order.slice();
+              const tmp = candidate[i];
+              candidate[i] = candidate[i + 1];
+              candidate[i + 1] = tmp;
+              const candidateScore = score(candidate);
+              if (candidateScore < bestScore) {
+                order = candidate;
+                bestScore = candidateScore;
+                improved = true;
+              }
+            }
+
+            // Single-node reinsert pass addresses stuck local minima.
+            for (let i = 0; i < order.length; i++) {
+              const node = order[i];
+              let bestLocal = order;
+              let bestLocalScore = bestScore;
+
+              for (let target = 0; target < order.length; target++) {
+                if (target === i) continue;
+                const candidate = order.slice();
+                candidate.splice(i, 1);
+                candidate.splice(target, 0, node);
+                const candidateScore = score(candidate);
+                if (candidateScore < bestLocalScore) {
+                  bestLocal = candidate;
+                  bestLocalScore = candidateScore;
+                }
+              }
+
+              if (bestLocalScore < bestScore) {
+                order = bestLocal;
+                bestScore = bestLocalScore;
+                improved = true;
+              }
+            }
+          }
+
+          return order;
+        }
+
+        const baseOrder = componentNodes
+          .slice()
+          .sort((a, b) => {
+            const d = degree(b) - degree(a);
+            if (d !== 0) return d;
+            return a.localeCompare(b);
+          });
+
+        const candidateOrders = [
+          buildBarycentricOrder(baseOrder),
+          buildBarycentricOrder(baseOrder.slice().reverse()),
+          buildBarycentricOrder(componentNodes.slice().sort((a, b) => a.localeCompare(b))),
+          buildBarycentricOrder(componentNodes.slice().sort((a, b) => b.localeCompare(a)))
+        ];
+
+        let bestOrder = candidateOrders[0];
+        let bestOrderScore = score(bestOrder);
+        for (let i = 1; i < candidateOrders.length; i++) {
+          const candidateScore = score(candidateOrders[i]);
+          if (candidateScore < bestOrderScore) {
+            bestOrder = candidateOrders[i];
+            bestOrderScore = candidateScore;
+          }
+        }
+
+        const improved = improveOrder(bestOrder);
+        const improvedReversed = improveOrder(bestOrder.slice().reverse());
+        return score(improved) <= score(improvedReversed) ? improved : improvedReversed;
+      }
+
+      const orderedComponents = components
+        .map((comp) => buildComponentOrder(comp))
+        .sort((a, b) => {
+          const aDegree = a.reduce((sum, name) => sum + degree(name), 0);
+          const bDegree = b.reduce((sum, name) => sum + degree(name), 0);
+          if (bDegree !== aDegree) return bDegree - aDegree;
+          if (b.length !== a.length) return b.length - a.length;
+          return a[0].localeCompare(b[0]);
+        });
+
+      const orderedEntities = orderedComponents.flat();
+      const orderIndex = new Map(orderedEntities.map((name, idx) => [name, idx]));
+
+      const orderedRelationships = relationships.slice().sort((a, b) => {
+        const aMin = Math.min(orderIndex.get(a.left) ?? 999999, orderIndex.get(a.right) ?? 999999);
+        const bMin = Math.min(orderIndex.get(b.left) ?? 999999, orderIndex.get(b.right) ?? 999999);
+        if (aMin !== bMin) return aMin - bMin;
+
+        const aSpan = Math.abs((orderIndex.get(a.left) ?? 999999) - (orderIndex.get(a.right) ?? 999999));
+        const bSpan = Math.abs((orderIndex.get(b.left) ?? 999999) - (orderIndex.get(b.right) ?? 999999));
+        if (aSpan !== bSpan) return aSpan - bSpan;
+
+        const aLeft = orderIndex.get(a.left) ?? 999999;
+        const bLeft = orderIndex.get(b.left) ?? 999999;
+        if (aLeft !== bLeft) return aLeft - bLeft;
+
+        const aRight = orderIndex.get(a.right) ?? 999999;
+        const bRight = orderIndex.get(b.right) ?? 999999;
+        if (aRight !== bRight) return aRight - bRight;
+
+        return a.raw.localeCompare(b.raw);
+      });
+
+      const rebuilt = ['erDiagram'];
+      for (const entityName of orderedEntities) {
+        const block = entityBlocks.get(entityName);
+        if (!block) continue;
+        rebuilt.push(...block);
+      }
+
+      passthroughLines.forEach((line) => rebuilt.push(`  ${line}`));
+      orderedRelationships.forEach((rel) => rebuilt.push(`  ${rel.raw}`));
+      return rebuilt.join('\n');
     }
 
     async function renderDiagram(code) {
-      const mermaidCode = (code || '').trim();
+      const mermaidCode = organizeErDiagram(normalizeErKeySyntax(code)).trim();
       if (!mermaidCode) {
         diagram.innerHTML = '';
         setStatus('No Mermaid content to render.', true);
@@ -311,6 +787,7 @@
         const id = 'm' + Date.now();
         const result = await mermaid.render(id, mermaidCode);
         diagram.innerHTML = result.svg;
+
         activateDiagramSizing();
         setStatus('Rendered. Use controls to navigate.');
       } catch (err) {

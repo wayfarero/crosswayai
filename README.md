@@ -46,6 +46,13 @@ The following commands are available in the Command Palette and via context menu
 
 ## Release Notes
 
+### 1.6.3
+
+- Bug fixes in CrossWayAI Viewer link highlight functionality
+- Improved Table Relations diagram prompt handling
+- Bug fixed Impact diagram generation
+- Automatically highlight circular references in Impact diagram
+
 ### 1.6.2
 
 - Added mouse click highlight arrow functionality in the CrossWayAI viewer

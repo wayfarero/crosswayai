@@ -1,4 +1,16 @@
-(regenerate even if output file present) table relationships from <workspaceRoot>\\.crosswayai\dump\<databasename>.df,
-output to <workspaceRoot>\\.crosswayai\mermaid\table_relations_<databasename>.md, 
-label table relation arrows with type of relation(1-1, 1-n, etc)
-
+(regenerate even if output file present) table relationships from <workspaceRoot>\.crosswayai\dump\<databasename>.df,
+output to <workspaceRoot>\.crosswayai\mermaid\table_relations_<databasename>.md,
+reset chat context before regenerate
+create mermaid folder if not exists
+use erDiagram model
+Add PK and FK
+No comments in the erDiagram
+Output only one Markdown Mermaid block (```mermaid ... ```), no extra text.
+Put all entity blocks first, then relationship lines.
+Group related tables together: place directly related entities adjacent in the entity block section, keep each related group contiguous before moving to the next group, and optimize entity/relationship ordering to eliminate line intersections between relationship links; if a zero-crossing layout is impossible, minimize crossings and keep only unavoidable ones.
+For each high-degree table, balance adjacent related entities on both sides in the entity ordering so relationship links do not all leave from the same side of that table.
+Never place relationship lines so they pass through entity rectangles; prefer ordering and spacing that keeps lines in open lanes between entity blocks.
+Every relationship line must use Mermaid ER syntax and end with one explicit label only: "1:1" or "1:many" or "many:many". Never output placeholders like "<relationship_type>". Reverse direction so FK table is always left and referenced PK table is right. Examples: AppUser ||--|| Profile : "1:1" ; AppUser }o--|| Organization : "1:many" ; User }o--o{ Role : "many:many".
+Keep original DB data types, but normalize Mermaid-unsafe type names.
+Replace datetime-tz with datetime_tz.
+In type names allow only letters, digits and underscore (_).
