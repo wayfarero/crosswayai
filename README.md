@@ -11,8 +11,9 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Impact Analysis
     - Include Diagram
     - Interface Diagram
-    - Interface Diagram
+    - Inheritance Diagram
     - Call Diagram
+    - Package Diagram
     - Table Relations Diagram
 
 ## Requirements
@@ -41,10 +42,16 @@ The following commands are available in the Command Palette and via context menu
 -   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
 -   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
+-   `Package Diagram`: Generate a package diagram for the selected file using chat agent.
 -   `Table Relations Diagram`: Generate the selected .df file's tables relations diagram using chat agent
 -   `View diagram`: Open the CrossWayAI viewer for the selected .md file
 
 ## Release Notes
+
+### 1.6.5
+
+- Added support for new `Package Diagram` diagram type for visualizing the complete package tree structure of a class
+- Code refactoring improvements for better maintainability
 
 ### 1.6.4
 

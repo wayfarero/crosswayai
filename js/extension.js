@@ -8,6 +8,8 @@ const { generateImpactDiagram } = require('./impactDiagram');
 const { generateInterfaceDiagram } = require('./interfaceDiagram');
 const { generateCallDiagram } = require('./callDiagram');
 const { generateInheritanceDiagram } = require('./inheritanceDiagram');
+const { generatePackageDiagram } = require('./packageDiagram');
+const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 
@@ -37,62 +39,23 @@ function activate(context) {
         getDsMapArray
     });
 
-    const getDependencyMapDeps = () => ({
+    const getCommonDeps = () => ({
         vscode,
         fs,
         path,
         CrossWayAILog
     });
 
-    const handleDependencyMap = (ctx) => generateDependencyMap(ctx, getDependencyMapDeps());
+    const handleDependencyMap = (ctx) => generateDependencyMap(ctx, getCommonDeps());
     const handleImpactDiagram = (ctx, uri) => generateImpactDiagram(ctx, uri, getDiagramDeps());
     const handleIncludeDiagram = (ctx, uri) => generateIncludeDiagram(ctx, uri, getDiagramDeps());
     const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
     const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
     const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
-    const getDumpDfFileDeps = () => ({
-        vscode,
-        fs,
-        path,
-        CrossWayAILog
-    });
-    // Updated to support new dumpDfFile signature with optional arguments
-    const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getDumpDfFileDeps(), dbName, workspaceRoot, pfFilePath);
-    const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getDumpDfFileDeps());
-    
-    const handleTableRelationsDiagram = async (ctx, uri) => {
-        if (!uri || !uri.fsPath) {
-            vscode.window.showErrorMessage('No file selected');
-            return;
-        }
-        
-        try {
-            // Get the filename without extension (database name)
-            const fileName = path.basename(uri.fsPath, path.extname(uri.fsPath));
-            
-            // Get workspace root
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                vscode.window.showErrorMessage('No workspace folder found');
-                return;
-            }
-            const workspaceRoot = workspaceFolders[0].uri.fsPath;
-            
-            // Read the template file
-            const templatePath = path.join(ctx.extensionPath, 'resources', 'mermaid_prompts', '@mermaid_table_relations');
-            const templateContent = fs.readFileSync(templatePath, 'utf8');
-            
-            // Replace <databasename> and <workspaceRoot> with actual values
-            const prompt = templateContent
-                .replace(/<databasename>/g, fileName)
-                .replace(/<workspaceRoot>/g, workspaceRoot);
-            
-            // Open chat and pre-fill it with the prompt
-            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
-        } catch (error) {
-            vscode.window.showErrorMessage(`Error processing table relations: ${error.message}`);
-        }
-    };
+    const handlePackageDiagram = (ctx, uri) => generatePackageDiagram(ctx, uri, getCommonDeps());
+    const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri, getCommonDeps());
+    const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getCommonDeps(), dbName, workspaceRoot, pfFilePath);
+    const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getCommonDeps());
 
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
@@ -104,7 +67,8 @@ function activate(context) {
         { name: 'crosswayai.openCrosswayAIViewer', handler: openCrosswayAIViewer },
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
-        { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram }
+        { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram },
+        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram }
     ];
 
     commands.forEach(command => {

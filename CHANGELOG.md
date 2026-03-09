@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.5
+
+- Added support for new `Package Diagram` diagram type for visualizing the complete package tree structure of a class
+- Code refactoring improvements for better maintainability
+
 ## 1.6.4
 
 - Refactored code diagram generation commands with enhanced node and link visibility:

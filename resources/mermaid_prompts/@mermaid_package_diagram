@@ -1,0 +1,12 @@
+from `<workspaceRoot>\.crosswayAI\dsMap.json`
+build a mermaid flowchart package diagram starting from the selected class file "<selectedFilePath>".
+- resolve the class package chain from leaf to root (e.g., main.SubPackage.Example).
+- Include all other classes and subpackages with same root as the selected class file , even if empty or without nested elements.
+- Arrange the diagram in a star shape centered on the root node:
+  - Place level1 nodes (e.g., SubPackage, SubPackage2, SubPackage3) on the same horizontal level around the center.
+  - Align all nodes in the same branch vertically.
+- Use distinct pastel hues for each branch, with level1 nodes using the darkest shade and deeper levels using lighter gradients.
+- Set the text color for nodes to match their branch's pastel hue using the `style` directive.
+- make the selected source class node be twice as big as the other nodes
+- Do not display full root paths or subpackage paths in node labels; display only package names and append `.cls` for class nodes.
+- Output the diagram to `<workspaceRoot>\.crosswayai\mermaid\package_<selectedFileName>.md`.
