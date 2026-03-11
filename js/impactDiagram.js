@@ -1,4 +1,11 @@
-const { generateDiagram, createMermaidGraphWriter } = require('./diagramCommon');
+const {
+    generateDiagram,
+    createMermaidGraphWriter,
+    toMermaidNodeId,
+    buildLinkEdgeMap,
+    getCircularEdgeKeys,
+    renderSortedEdges
+} = require('./diagramCommon');
 
 async function generateImpactDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'impact', generateMermaidImpactGraph);
@@ -44,6 +51,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
         );
 
         parentLinks.forEach(parentLink => {
+
             linksToRender.add(parentLink);
 
             if (!visitedNodes.has(parentLink.ParentNodeId)) {
@@ -83,64 +91,70 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
 
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
+    const edgeDetails = {};
 
-    const edges = new Map();
+    function parseCallRelationLabel(rawLinkType) {
+        if (typeof rawLinkType !== 'string') {
+            return '';
+        }
 
-    linksToRender.forEach(link => {
-        const sourceNode = allFileNodes.find(f => f.NodeId === link.ParentNodeId);
-        const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
+        const normalized = rawLinkType.trim();
+        if (!normalized) {
+            return '';
+        }
 
-        if (sourceNode && destNode) {
-            ensureNodeDeclaration(sourceNode);
-            ensureNodeDeclaration(destNode);
-
-            const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
-            if (!edges.has(edgeKey)) {
-                edges.set(edgeKey, {
-                    sourceNode,
-                    destNode,
-                    labels: new Set()
-                });
+        const lower = normalized.toLowerCase();
+        if (lower.startsWith('invoke:') || lower.startsWith('run:')) {
+            const parts = normalized.split(':');
+            if (parts.length > 1) {
+                const methodOrProcedure = parts[1].split(',')[0].trim();
+                if (methodOrProcedure) {
+                    return methodOrProcedure.replace(/\s+/g, ' ');
+                }
             }
+            return '';
+        }
 
+        return '';
+    }
+
+    const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
+        includeLabels: true,
+        labelExtractor: link => {
             const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
-            const firstLinkTypeEntry = rawLinkType.split(':')[0].trim();
-            if (firstLinkTypeEntry) {
-                edges.get(edgeKey).labels.add(firstLinkTypeEntry);
-            }
-        }
+            return rawLinkType.split(':')[0].trim();
+        },
+        includeDetailLabels: true,
+        detailLabelExtractor: link => parseCallRelationLabel(link.LinkType),
+        preserveLinkTypeCase: false
     });
 
-    // identify any bidirectional pairs so we can style them specially
-    const bidirectional = new Set();
-    edges.forEach((_, key) => {
-        const [src, dst] = key.split('->');
-        const revKey = `${dst}->${src}`;
-        if (edges.has(revKey)) {
-            bidirectional.add(key);
-            bidirectional.add(revKey);
-        }
+    const circular = getCircularEdgeKeys(edges);
+
+    renderSortedEdges(edges, addEdge, {
+        circularEdgeKeys: circular,
+        labelBuilder: edge => Array.from(edge.labels).join(', ')
     });
 
-    // iterate in deterministic order for stable diagrams
-    const sortedEntries = Array.from(edges.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    let edgeIndex = 0;
-    const styleLines = [];
-
-    sortedEntries.forEach(([key, edge]) => {
-        const labels = Array.from(edge.labels).join(', ');
-        addEdge(edge.sourceNode, edge.destNode, labels);
-
-        if (bidirectional.has(key)) {
-            // mark this edge red using mermaid's linkStyle syntax
-            styleLines.push(`    linkStyle ${edgeIndex} stroke:red,stroke-width:2px`);
+    Array.from(edges.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([, edge]) => {
+        const sourceNodeId = toMermaidNodeId(edge.sourceNode.FileName);
+        const destNodeId = toMermaidNodeId(edge.destNode.FileName);
+        const metadataKey = `${sourceNodeId}->${destNodeId}`;
+        const details = Array.from(edge.detailLabels)
+            .map(item => String(item || '').replace(/\r?\n/g, ' ').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b));
+        if (details.length > 0) {
+            edgeDetails[metadataKey] = details;
         }
-        edgeIndex++;
-    });
+        });
 
-    let graph = getGraph();
-    if (styleLines.length) {
-        graph += '\n' + styleLines.join('\n') + '\n';
+    const graph = getGraph();
+    const serializedEdgeDetails = JSON.stringify(edgeDetails);
+    if (serializedEdgeDetails && serializedEdgeDetails !== '{}') {
+        return `%%CROSSWAY_EDGE_DETAILS:${serializedEdgeDetails}\n${graph}`;
     }
 
     return graph;

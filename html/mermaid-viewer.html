@@ -94,6 +94,121 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    #legend {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      background: rgba(3,7,18,0.72);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 220px;
+      max-width: min(320px, calc(100vw - 20px));
+      color: #d1d5db;
+      font-size: 12px;
+      line-height: 1.35;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+    #legend[hidden] {
+      display: none;
+    }
+    #legend .legend-title {
+      color: #f3f4f6;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 0;
+    }
+    #legend .legend-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    #legend .legend-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #legend .legend-toggle {
+      width: 20px;
+      height: 18px;
+      border: 1px solid #4b5563;
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 4px;
+      padding: 0;
+      font-size: 12px;
+      line-height: 1;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #legend .legend-toggle:hover {
+      filter: brightness(1.1);
+    }
+    #legend .legend-body {
+      display: block;
+    }
+    #legend.collapsed .legend-body {
+      display: none;
+    }
+    #legend.collapsed .legend-header {
+      margin-bottom: 0;
+    }
+    #legend .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+    #legend .legend-node {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: #ffffff;
+      border: 2px solid #6b7280;
+      flex: 0 0 auto;
+    }
+    #legend .legend-line {
+      width: 16px;
+      height: 0;
+      border-top: 3px solid #6b7280;
+      border-radius: 2px;
+      flex: 0 0 auto;
+    }
+    #legend .legend-label {
+      color: #d1d5db;
+      min-width: 0;
+    }
+    #edgeTooltip {
+      position: fixed;
+      z-index: 30;
+      max-width: min(420px, calc(100vw - 20px));
+      background: rgba(3, 7, 18, 0.95);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      white-space: normal;
+    }
+    #edgeTooltip[hidden] {
+      display: none;
+    }
+    #edgeTooltip ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+    #edgeTooltip li {
+      margin: 2px 0;
+    }
   </style>
 </head>
 <body>
@@ -102,13 +217,15 @@
       <div id="diagram"></div>
     </div>
     <div class="overlay">
-      <button id="exportPng">Export PNG</button>
+      <button id="exportPng">Export Image</button>
       <button id="zoomIn">+</button>
       <button id="zoomOut">-</button>
       <button id="fit">Fit</button>
       <button id="reset">Reset</button>
     </div>
     <div id="status">Ready.</div>
+    <div id="legend" hidden></div>
+    <div id="edgeTooltip" hidden></div>
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -126,17 +243,179 @@
     const status = document.getElementById('status');
     const stage = document.getElementById('stage');
     const diagram = document.getElementById('diagram');
+    const legend = document.getElementById('legend');
+    const edgeTooltip = document.getElementById('edgeTooltip');
 
     const params = new URLSearchParams(window.location.search);
     const defaultMarkdownPath = params.get('file') || '.crosswayai/mermaid/impact_runAnalysis.p.md';
 
+    const LINK_TYPE_COLORS = {
+      include: '#ed1e97',
+      run: '#1d6be0',
+      invoke: '#1d6be0',
+      inherits: '#18e2ce',
+      implements: '#1fcce2',
+      circular: '#ff0000',
+      selected: '#f97316',
+      undefined: '#555555'
+    };
     let currentZoom = 1;
     let svgBaseWidth = 0;
     let svgBaseHeight = 0;
+    let isLegendCollapsed = false;
+
+    function escapeHtml(text) {
+      return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function hideEdgeTooltip(force = false) {
+      if (!force && window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+        return;
+      }
+      edgeTooltip.hidden = true;
+      edgeTooltip.innerHTML = '';
+    }
+
+    function positionEdgeTooltip(clientX, clientY) {
+      if (edgeTooltip.hidden) {
+        return;
+      }
+
+      const offset = 12;
+      let left = clientX + offset;
+      let top = clientY + offset;
+      const rect = edgeTooltip.getBoundingClientRect();
+
+      if (left + rect.width > window.innerWidth - 8) {
+        left = Math.max(8, clientX - rect.width - offset);
+      }
+      if (top + rect.height > window.innerHeight - 8) {
+        top = Math.max(8, clientY - rect.height - offset);
+      }
+
+      edgeTooltip.style.left = `${left}px`;
+      edgeTooltip.style.top = `${top}px`;
+    }
+
+    function showEdgeTooltip(items, event) {
+      if (!items || items.length === 0) {
+        hideEdgeTooltip();
+        return;
+      }
+
+      const renderedItems = items
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join('');
+
+      if (!renderedItems) {
+        hideEdgeTooltip();
+        return;
+      }
+
+      edgeTooltip.innerHTML = `<ul>${renderedItems}</ul>`;
+      edgeTooltip.hidden = false;
+      positionEdgeTooltip(event.clientX, event.clientY);
+    }
 
     function setStatus(text, isError = false) {
       status.textContent = text;
       status.style.color = isError ? '#fca5a5' : '#9ca3af';
+    }
+
+    function isPackageDiagram(mermaidCode, markdownPath) {
+      const pathText = String(markdownPath || '');
+      if (/[/\\]package_[^/\\]+\.md$/i.test(pathText) || /^package_[^/\\]+\.md$/i.test(pathText)) {
+        return true;
+      }
+
+      // Package diagrams are generated externally and do not include CrossWay metadata.
+      // If a future package flow adds metadata, path naming above still keeps this excluded.
+      return false;
+    }
+
+    function isCrosswayDependencyDiagram(mermaidCode) {
+      const source = String(mermaidCode || '');
+      if (/^\s*%%CROSSWAY_SOURCE_NODE:/m.test(source)) {
+        return true;
+      }
+
+      const knownColors = Object.values(LINK_TYPE_COLORS)
+        .map(color => color.replace('#', '\\#'))
+        .join('|');
+
+      return new RegExp(`stroke\\s*:\\s*(?:${knownColors})`, 'i').test(source);
+    }
+
+    function buildLegendRow(type, label) {
+      const color = LINK_TYPE_COLORS[type] || '#6b7280';
+      return `<div class="legend-row"><span class="legend-line" style="border-top-color:${color};"></span><span class="legend-label">${label}</span></div>`;
+    }
+
+    function updateLegend(mermaidCode, markdownPath) {
+      const showLegend = isCrosswayDependencyDiagram(mermaidCode) && !isPackageDiagram(mermaidCode, markdownPath);
+      if (!showLegend) {
+        legend.hidden = true;
+        legend.innerHTML = '';
+        return;
+      }
+
+      legend.innerHTML = [
+        '<div class="legend-header">',
+        '<div class="legend-title">Legend</div>',
+        '<div class="legend-controls">',
+        '<button type="button" class="legend-toggle legend-minimize" title="Minimize legend" aria-label="Minimize legend">−</button>',
+        '<button type="button" class="legend-toggle legend-expand" title="Expand legend" aria-label="Expand legend">+</button>',
+        '</div>',
+        '</div>',
+        '<div class="legend-body">',
+        buildLegendRow('include', 'include'),
+        buildLegendRow('run', 'run / invoke'),
+        buildLegendRow('inherits', 'inherits'),
+        buildLegendRow('implements', 'implements'),
+        buildLegendRow('circular', 'circular'),
+        buildLegendRow('selected', 'Selected'),
+        buildLegendRow('undefined', 'multiple'),
+        '</div>'
+      ].join('');
+
+      const minimizeBtn = legend.querySelector('.legend-minimize');
+      const expandBtn = legend.querySelector('.legend-expand');
+      const updateButtons = () => {
+        legend.classList.toggle('collapsed', isLegendCollapsed);
+        if (minimizeBtn) minimizeBtn.style.display = isLegendCollapsed ? 'none' : 'inline-flex';
+        if (expandBtn) expandBtn.style.display = isLegendCollapsed ? 'inline-flex' : 'none';
+      };
+
+      if (minimizeBtn) {
+        minimizeBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          isLegendCollapsed = true;
+          updateButtons();
+        });
+      }
+
+      if (expandBtn) {
+        expandBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          isLegendCollapsed = false;
+          updateButtons();
+        });
+      }
+
+      // Prevent dragging/panning while interacting with legend controls.
+      legend.querySelectorAll('.legend-toggle').forEach((btn) => {
+        btn.addEventListener('mousedown', (event) => event.stopPropagation());
+      });
+
+      updateButtons();
+      legend.hidden = false;
     }
 
     function activateDiagramSizing() {
@@ -194,9 +473,11 @@
       const svg = diagram.querySelector('svg');
       if (!svg) return;
 
-      const HIGHLIGHT_COLOR = '#DC2626';
+      const HIGHLIGHT_COLOR = '#f97316';
       const CLICK_TOLERANCE = 24;
       let activeSelection = null;
+      let lockedNode = null;
+      window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
 
       function isDiagramEdgeElement(edgeEl) {
         if (!edgeEl) {
@@ -291,8 +572,365 @@
         return clickTarget;
       }
 
-      const allEdges = svg.querySelectorAll('path, line, polyline');
-      allEdges.forEach((edgeEl) => {
+      function fadeGraphExceptPath(pathNodes, svgElement, pathEdges) {
+        const pathSet = pathNodes instanceof Set ? pathNodes : new Set(pathNodes || []);
+        const keepEdges = pathEdges instanceof Set ? pathEdges : new Set();
+        svgElement.querySelectorAll('.node').forEach(node => {
+          const nodeId = getNodeIdentity(node);
+          node.style.opacity = nodeId && pathSet.has(nodeId) ? '1' : '0.1';
+        });
+
+        const diagramEdges = getDiagramEdgeElements(svgElement);
+        diagramEdges.forEach(edgeEl => {
+          const edgeIds = getEdgeIdentity(edgeEl);
+          const isOnPath = edgeIds ? keepEdges.has(`${edgeIds.from}->${edgeIds.to}`) : false;
+          edgeEl.style.opacity = isOnPath ? '1' : '0.1';
+        });
+
+        const edgeLabelGroups = getEdgeLabelGroups(svgElement);
+        edgeLabelGroups.forEach((labelGroup, index) => {
+          const edgeIds = getEdgeIdentity(labelGroup);
+          if (edgeIds) {
+            const isOnPath = keepEdges.has(`${edgeIds.from}->${edgeIds.to}`);
+            labelGroup.style.opacity = isOnPath ? '1' : '0.1';
+            return;
+          }
+
+          // Some Mermaid builds do not expose edge ids on labels; in that case,
+          // map labels to edges by render order.
+          const mappedEdge = index < diagramEdges.length ? diagramEdges[index] : null;
+          const mappedIds = getEdgeIdentity(mappedEdge);
+          if (!mappedIds) {
+            labelGroup.style.opacity = '1';
+            return;
+          }
+
+          const isMappedEdgeOnPath = keepEdges.has(`${mappedIds.from}->${mappedIds.to}`);
+          labelGroup.style.opacity = isMappedEdgeOnPath ? '1' : '0.1';
+        });
+      }
+
+      function resetGraphFade(svgElement) {
+
+        svgElement.querySelectorAll('.node').forEach(n => {
+          n.style.opacity = '1';
+        });
+
+        svgElement.querySelectorAll('path, line, polyline').forEach(e => {
+          if (!isDiagramEdgeElement(e)) {
+            return;
+          }
+          e.style.opacity = '1';
+        });
+
+        getEdgeLabelGroups(svgElement).forEach((labelGroup) => {
+          labelGroup.style.opacity = '1';
+        });
+
+      }
+
+      function getEdgeLabelGroups(svgElement) {
+        if (!svgElement) {
+          return [];
+        }
+
+        const selectors = [
+          '.edgeLabels .edgeLabel',
+          'g.edgeLabel'
+        ];
+        const groups = new Set();
+
+        selectors.forEach((selector) => {
+          svgElement.querySelectorAll(selector).forEach((labelEl) => {
+            const container = labelEl.closest('g.edgeLabel, g[id*="L-"]') || labelEl;
+            groups.add(container);
+          });
+        });
+
+        return Array.from(groups);
+      }
+
+      function getDiagramEdgeElements(svgElement) {
+        if (!svgElement) {
+          return [];
+        }
+        return Array.from(svgElement.querySelectorAll('path, line, polyline'))
+          .filter((edgeEl) => isDiagramEdgeElement(edgeEl));
+      }
+
+      function getNodeIdentity(nodeEl) {
+        if (!nodeEl) return null;
+        const dataId = nodeEl.getAttribute('data-id');
+        if (dataId) return dataId;
+
+        const className = nodeEl.getAttribute('class') || '';
+        const classMatch = className.match(/\bid-([A-Za-z0-9_]+)\b/);
+        if (classMatch) return classMatch[1];
+
+        const id = nodeEl.id || '';
+        const flowMatch = id.match(/(?:flowchart|graph)-([A-Za-z0-9_]+)-\d+$/i);
+        if (flowMatch) return flowMatch[1];
+
+        const fallbackLabel = nodeEl.querySelector('text')?.textContent?.trim();
+        return fallbackLabel || null;
+      }
+
+      function getEdgeIdentity(edgeEl) {
+        if (!edgeEl) return null;
+
+        const edgeGroup = edgeEl.closest('g.edgePath, g[id*="L-"], g[class*="edge"]');
+        const edgeTokens = [
+          edgeEl.getAttribute('id') || '',
+          edgeEl.getAttribute('class') || '',
+          edgeGroup?.getAttribute('id') || '',
+          edgeGroup?.getAttribute('class') || ''
+        ].join(' ');
+
+        let match = edgeTokens.match(/L-([A-Za-z0-9_.-]+)-([A-Za-z0-9_.-]+)-\d+/);
+        if (!match) {
+          match = edgeTokens.match(/LS-([A-Za-z0-9_.-]+)[^A-Za-z0-9_.-]+LE-([A-Za-z0-9_.-]+)/);
+        }
+        if (match) {
+          return {
+            from: match[1],
+            to: match[2]
+          };
+        }
+
+        return null;
+      }
+
+      function buildEdgeGraph(svgElement) {
+        const outgoing = new Map();
+        const incoming = new Map();
+
+        function add(map, from, to) {
+          if (!map.has(from)) {
+            map.set(from, new Set());
+          }
+          map.get(from).add(to);
+        }
+
+        svgElement.querySelectorAll('path, line, polyline').forEach(edgeEl => {
+          if (!isDiagramEdgeElement(edgeEl)) {
+            return;
+          }
+          const edge = getEdgeIdentity(edgeEl);
+          if (!edge) {
+            return;
+          }
+          add(outgoing, edge.from, edge.to);
+          add(incoming, edge.to, edge.from);
+        });
+
+        return { outgoing, incoming };
+      }
+
+      function collectDirectedSubgraphToSource(startNodeId, sourceNodeId, svgElement) {
+        if (!startNodeId || !sourceNodeId || !svgElement) {
+          return {
+            nodes: new Set(startNodeId ? [startNodeId] : []),
+            edges: new Set()
+          };
+        }
+
+        const { outgoing, incoming } = buildEdgeGraph(svgElement);
+        
+        function collectPaths(stepMap, reverseStepMap, edgeKeyBuilder) {
+          const canReachSource = new Set([sourceNodeId]);
+          const reverseQueue = [sourceNodeId];
+
+          while (reverseQueue.length) {
+            const current = reverseQueue.shift();
+            const prevNodes = reverseStepMap.get(current);
+            if (!prevNodes) continue;
+            prevNodes.forEach((prev) => {
+              if (canReachSource.has(prev)) return;
+              canReachSource.add(prev);
+              reverseQueue.push(prev);
+            });
+          }
+
+          if (!canReachSource.has(startNodeId)) {
+            return null;
+          }
+
+          const keepNodes = new Set([startNodeId]);
+          const keepEdges = new Set();
+          const stack = [startNodeId];
+          const visited = new Set([startNodeId]);
+
+          while (stack.length) {
+            const current = stack.pop();
+            const nextNodes = stepMap.get(current);
+            if (!nextNodes) continue;
+
+            nextNodes.forEach((next) => {
+              if (!canReachSource.has(next)) {
+                return;
+              }
+              keepNodes.add(next);
+              keepEdges.add(edgeKeyBuilder(current, next));
+              if (!visited.has(next)) {
+                visited.add(next);
+                stack.push(next);
+              }
+            });
+          }
+
+          return { nodes: keepNodes, edges: keepEdges };
+        }
+
+        // Preferred: follow arrow direction toward source.
+        const forwardPaths = collectPaths(
+          outgoing,
+          incoming,
+          (current, next) => `${current}->${next}`
+        );
+        if (forwardPaths) {
+          return forwardPaths;
+        }
+
+        // Fallback: if hovered node is below source, keep opposite-direction route.
+        const reversePaths = collectPaths(
+          incoming,
+          outgoing,
+          (current, next) => `${next}->${current}`
+        );
+        if (reversePaths) {
+          return reversePaths;
+        }
+
+        return {
+          nodes: new Set([startNodeId]),
+          edges: new Set()
+        };
+      }
+
+      function getPathToRoot(nodeId) {
+
+        const path = [];
+        let current = nodeId;
+
+        while (current) {
+
+          path.push(current);
+
+          const parent = window.CROSSWAY_PARENT_MAP?.[current];
+
+          if (!parent) break;
+
+          current = parent;
+
+        }
+
+        return path;
+
+      }
+
+      function getHighlightSubgraph(nodeId, svgElement) {
+        const sourceNodeId = window.CROSSWAY_SOURCE_NODE || null;
+        if (sourceNodeId) {
+          return collectDirectedSubgraphToSource(nodeId, sourceNodeId, svgElement);
+        }
+
+        const path = getPathToRoot(nodeId);
+        const nodes = new Set(path);
+        const edges = new Set();
+        for (let i = 0; i < path.length - 1; i++) {
+          edges.add(`${path[i]}->${path[i + 1]}`);
+        }
+        return { nodes, edges };
+      }
+
+      function toUniqueList(values) {
+        const unique = new Set();
+        (Array.isArray(values) ? values : []).forEach((value) => {
+          const text = String(value || '').trim();
+          if (text) {
+            unique.add(text);
+          }
+        });
+        return Array.from(unique);
+      }
+
+      function filterTooltipCallItems(values) {
+        const blocked = new Set([
+          'include',
+          'inherits',
+          'implements',
+          'extends',
+          'circular',
+          'undefined',
+          'multiple'
+        ]);
+
+        return toUniqueList(values).filter((item) => !blocked.has(item.toLowerCase()));
+      }
+
+      function getEdgeTooltipItems(edgeEl, edgeElementOrder, fallbackLabelsByEdge) {
+        const edgeIds = getEdgeIdentity(edgeEl);
+        if (edgeIds) {
+          const metadataKey = `${edgeIds.from}->${edgeIds.to}`;
+          const metadataItems = window.CROSSWAY_EDGE_DETAILS?.[metadataKey];
+          if (Array.isArray(metadataItems) && metadataItems.length > 0) {
+            return filterTooltipCallItems(metadataItems);
+          }
+
+          const idMappedItems = fallbackLabelsByEdge.get(metadataKey);
+          if (idMappedItems && idMappedItems.length > 0) {
+            return filterTooltipCallItems(idMappedItems);
+          }
+        }
+
+        const mappedFallbackItems = fallbackLabelsByEdge.get(edgeEl);
+        if (mappedFallbackItems && mappedFallbackItems.length > 0) {
+          return filterTooltipCallItems(mappedFallbackItems);
+        }
+
+        const edgeIndex = edgeElementOrder.indexOf(edgeEl);
+        if (edgeIndex >= 0) {
+          const indexMappedItems = fallbackLabelsByEdge.get(edgeIndex);
+          if (indexMappedItems && indexMappedItems.length > 0) {
+            return filterTooltipCallItems(indexMappedItems);
+          }
+        }
+
+        return [];
+      }
+      
+      const allDiagramEdges = getDiagramEdgeElements(svg);
+      const edgeLabelGroups = getEdgeLabelGroups(svg);
+      const fallbackLabelsByEdge = new Map();
+
+      edgeLabelGroups.forEach((labelGroup, index) => {
+        const labelText = (labelGroup.textContent || '').trim();
+        if (!labelText) {
+          return;
+        }
+
+        const parsedItems = labelText
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
+        if (parsedItems.length === 0) {
+          return;
+        }
+
+        const edgeIds = getEdgeIdentity(labelGroup);
+        if (edgeIds) {
+          const idKey = `${edgeIds.from}->${edgeIds.to}`;
+          fallbackLabelsByEdge.set(idKey, parsedItems);
+        }
+
+        if (index < allDiagramEdges.length) {
+          fallbackLabelsByEdge.set(allDiagramEdges[index], parsedItems);
+        }
+
+        fallbackLabelsByEdge.set(index, parsedItems);
+      });
+
+      allDiagramEdges.forEach((edgeEl) => {
         if (!isDiagramEdgeElement(edgeEl)) {
           return;
         }
@@ -307,11 +945,86 @@
 
           if (activeSelection && activeSelection.pathElement === edgeEl) {
             clearActiveSelection();
+          } else {
+            highlightEdge(edgeEl);
+          }
+
+          const items = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge);
+          window.CROSSWAY_EDGE_TOOLTIP_PINNED = true;
+          showEdgeTooltip(items, event);
+        });
+
+        clickTarget.addEventListener('mouseenter', (event) => {
+          if (window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
             return;
           }
-          highlightEdge(edgeEl);
+          const items = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge);
+          showEdgeTooltip(items, event);
+        });
+
+        clickTarget.addEventListener('mousemove', (event) => {
+          if (edgeTooltip.hidden || window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+            return;
+          }
+          positionEdgeTooltip(event.clientX, event.clientY);
+        });
+
+        clickTarget.addEventListener('mouseleave', () => {
+          hideEdgeTooltip();
         });
       });
+
+      const allNodes = svg.querySelectorAll('.node');
+      
+      allNodes.forEach(node => {
+
+        node.addEventListener('mouseenter', () => {
+
+          if (lockedNode) return;
+
+          const nodeId = getNodeIdentity(node);
+          if (!nodeId) return;
+
+          const highlight = getHighlightSubgraph(nodeId, svg);
+          fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+
+        });
+
+        node.addEventListener('mouseleave', () => {
+          if (lockedNode) return;
+          resetGraphFade(svg);
+        });
+
+      });
+      
+      allNodes.forEach(node => {
+
+        node.addEventListener('click', (event) => {
+
+          event.stopPropagation();
+          window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+          hideEdgeTooltip(true);
+
+          const nodeId = getNodeIdentity(node);
+          if (!nodeId) return;
+
+          if (lockedNode === nodeId) {
+
+            lockedNode = null;
+            resetGraphFade(svg);
+            return;
+
+          }
+
+          lockedNode = nodeId;
+
+          const highlight = getHighlightSubgraph(nodeId, svg);
+          fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+
+        });
+
+      });
+
 
       function highlightArrow(pathElement, pathId, color, svgElement) {
         const originalStroke = pathElement.getAttribute('stroke') || '#000';
@@ -391,7 +1104,13 @@
         }
       }
       svg.addEventListener('click', () => {
+
+        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
         clearActiveSelection();
+        lockedNode = null;
+        resetGraphFade(svg);
+        hideEdgeTooltip(true);
+
       });
     }
 
@@ -772,18 +1491,47 @@
       return rebuilt.join('\n');
     }
 
-    async function renderDiagram(code) {
+    async function renderDiagram(code, markdownPath = defaultMarkdownPath) {
       const mermaidCode = organizeErDiagram(normalizeErKeySyntax(code)).trim();
+      window.CROSSWAY_PARENT_MAP = {};
+      window.CROSSWAY_SOURCE_NODE = null;
+      window.CROSSWAY_EDGE_DETAILS = {};
+      const sourceNodeMatch = (code || '').match(/^\s*%%CROSSWAY_SOURCE_NODE:(.*)$/m);
+      if (sourceNodeMatch) {
+        window.CROSSWAY_SOURCE_NODE = sourceNodeMatch[1].trim() || null;
+      }
+      const parentMapMatch = (code || '').match(/^\s*%%CROSSWAY_PARENT_MAP:(.*)$/m);
+      if (parentMapMatch) {
+        try {
+          window.CROSSWAY_PARENT_MAP = JSON.parse(parentMapMatch[1]);
+        } catch {
+          window.CROSSWAY_PARENT_MAP = {};
+        }
+      }
+      const edgeDetailsMatch = (code || '').match(/^\s*%%CROSSWAY_EDGE_DETAILS:(.*)$/m);
+      if (edgeDetailsMatch) {
+        try {
+          window.CROSSWAY_EDGE_DETAILS = JSON.parse(edgeDetailsMatch[1]);
+        } catch {
+          window.CROSSWAY_EDGE_DETAILS = {};
+        }
+      }
+
       if (!mermaidCode) {
         diagram.innerHTML = '';
+        updateLegend('', markdownPath);
         setStatus('No Mermaid content to render.', true);
         return;
       }
+
+      updateLegend(mermaidCode, markdownPath);
 
       setStatus('Rendering...');
 
       try {
         diagram.innerHTML = '';
+        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        hideEdgeTooltip(true);
         const id = 'm' + Date.now();
         const result = await mermaid.render(id, mermaidCode);
         diagram.innerHTML = result.svg;
@@ -910,7 +1658,7 @@
         return;
       }
 
-      setStatus('Exporting PNG...');
+      setStatus('Exporting image...');
 
       try {
         const dataUrl = await svgToPngDataUrl(svg);
@@ -931,7 +1679,7 @@
         }
 
         try {
-          setStatus('PNG blocked by browser security. Exporting SVG...');
+          setStatus('PNG blocked by browser security. Exporting as SVG...');
           const fileBase = buildExportFileName();
           const svgText = serializeSvg(svg);
           const result = await uploadExport({
@@ -976,7 +1724,7 @@
           return;
         }
 
-        await renderDiagram(blocks[0]);
+        await renderDiagram(blocks[0], markdownPath);
         setStatus(`Loaded Mermaid from ${markdownPath}.`);
       } catch (err) {
         setStatus('Markdown load failed: ' + (err && err.message ? err.message : String(err)), true);

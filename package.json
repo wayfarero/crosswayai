@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.6.5",
+    "version": "1.6.6",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",

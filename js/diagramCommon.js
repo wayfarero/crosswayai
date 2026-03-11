@@ -64,6 +64,206 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
         });
     });
 }
+
+function toMermaidNodeId(fileName) {
+    return String(fileName || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function getDsMapArray(dsMap, tableName) {
+    return (((dsMap || {}).dsMap || {})[tableName]) || [];
+}
+
+function getFirstLinkTypeEntry(linkType, { toLowerCase = true } = {}) {
+    if (typeof linkType !== 'string') {
+        return '';
+    }
+
+    const firstEntry = linkType.split(':')[0].trim();
+    if (!firstEntry) {
+        return '';
+    }
+
+    return toLowerCase ? firstEntry.toLowerCase() : firstEntry;
+}
+
+function collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
+    direction = 'down',
+    visited = new Set(),
+    linksToRender = new Set(),
+    looseEquality = false
+} = {}) {
+    const equals = looseEquality ? ((a, b) => a == b) : ((a, b) => a === b); // eslint-disable-line eqeqeq
+
+    function walk(nodeId) {
+        if (!nodeId || visited.has(nodeId)) {
+            return;
+        }
+
+        visited.add(nodeId);
+
+        const matchingLinks = allFileLinks.filter(link => {
+            if (!predicate(link)) {
+                return false;
+            }
+            return direction === 'up'
+                ? equals(link.NodeId, nodeId)
+                : equals(link.ParentNodeId, nodeId);
+        });
+
+        matchingLinks.forEach(link => {
+            linksToRender.add(link);
+            walk(direction === 'up' ? link.ParentNodeId : link.NodeId);
+        });
+    }
+
+    walk(startNodeId);
+    return linksToRender;
+}
+
+function collectBidirectionalLinks(allFileLinks, startNodeId, predicate, options = {}) {
+    const {
+        linksToRender = new Set(),
+        upVisited = new Set(),
+        downVisited = new Set(),
+        looseEqualityUp = false,
+        looseEqualityDown = false
+    } = options;
+
+    collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
+        direction: 'up',
+        visited: upVisited,
+        linksToRender,
+        looseEquality: looseEqualityUp
+    });
+    collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
+        direction: 'down',
+        visited: downVisited,
+        linksToRender,
+        looseEquality: looseEqualityDown
+    });
+
+    return linksToRender;
+}
+
+function dedupeLinks(links, keyFactory) {
+    const seen = new Set();
+    const deduped = [];
+
+    links.forEach(link => {
+        const key = keyFactory(link);
+        if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(link);
+        }
+    });
+
+    return deduped;
+}
+
+function buildLinkEdgeMap(links, allFileNodes, ensureNodeDeclaration, {
+    includeLabels = false,
+    labelExtractor = null,
+    includeDetailLabels = false,
+    detailLabelExtractor = null,
+    preserveLinkTypeCase = false
+} = {}) {
+    const nodeById = new Map();
+    allFileNodes.forEach(node => {
+        nodeById.set(node.NodeId, node);
+    });
+
+    const edges = new Map();
+
+    links.forEach(link => {
+        const sourceNode = nodeById.get(link.ParentNodeId);
+        const destNode = nodeById.get(link.NodeId);
+
+        if (!sourceNode || !destNode) {
+            return;
+        }
+
+        ensureNodeDeclaration(sourceNode);
+        ensureNodeDeclaration(destNode);
+
+        const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
+        if (!edges.has(edgeKey)) {
+            edges.set(edgeKey, {
+                sourceNode,
+                destNode,
+                labels: new Set(),
+                linkTypes: new Set(),
+                detailLabels: new Set()
+            });
+        }
+
+        const edge = edges.get(edgeKey);
+        const linkTypeEntry = getFirstLinkTypeEntry(link.LinkType, { toLowerCase: !preserveLinkTypeCase });
+        if (linkTypeEntry) {
+            edge.linkTypes.add(linkTypeEntry);
+        }
+
+        if (includeLabels) {
+            const labelValue = labelExtractor ? labelExtractor(link) : getFirstLinkTypeEntry(link.LinkType, { toLowerCase: false });
+            if (labelValue) {
+                edge.labels.add(labelValue);
+            }
+        }
+
+        if (includeDetailLabels && detailLabelExtractor) {
+            const detailLabel = detailLabelExtractor(link);
+            if (detailLabel) {
+                edge.detailLabels.add(detailLabel);
+            }
+        }
+    });
+
+    return edges;
+}
+
+function getCircularEdgeKeys(edges) {
+    const circular = new Set();
+    edges.forEach((_, key) => {
+        const [sourceId, destId] = key.split('->');
+        const reverseKey = `${destId}->${sourceId}`;
+        if (edges.has(reverseKey)) {
+            circular.add(key);
+            circular.add(reverseKey);
+        }
+    });
+    return circular;
+}
+
+function renderSortedEdges(edges, addEdge, {
+    circularEdgeKeys = null,
+    labelBuilder = null
+} = {}) {
+    const circular = circularEdgeKeys || getCircularEdgeKeys(edges);
+
+    Array.from(edges.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([key, edge]) => {
+            const edgeTypes = Array.from(edge.linkTypes);
+            if (circular.has(key)) {
+                edgeTypes.push('circular');
+            }
+
+            const label = labelBuilder ? labelBuilder(edge) : '';
+            addEdge(edge.sourceNode, edge.destNode, label, edgeTypes);
+        });
+}
+
+function prependSourceMetadata(graph, targetNode) {
+    const sourceNodeId = toMermaidNodeId(targetNode && targetNode.FileName ? targetNode.FileName : 'unknown');
+    const sourceLine = `%%CROSSWAY_SOURCE_NODE:${sourceNodeId}`;
+    const graphText = typeof graph === 'string' ? graph : String(graph || '');
+
+    if (/^\s*%%CROSSWAY_SOURCE_NODE:/m.test(graphText)) {
+        return graphText;
+    }
+
+    return `${sourceLine}\n${graphText}`;
+}
+
 function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
     const { vscode, fs, path, getDsMapArray } = deps;
     let filePath = '';
@@ -166,7 +366,8 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
             return;
         }
 
-        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, targetNode.FileName, mermaidGraph);
+        const graphWithMetadata = prependSourceMetadata(mermaidGraph, targetNode);
+        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, targetNode.FileName, graphWithMetadata);
         if (savedPath) {
             await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
             vscode.window.showInformationMessage(`Mermaid diagram saved: ${savedPath}`);
@@ -178,15 +379,24 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     }
 }
 
-function createMermaidGraphWriter(targetNode, graphType = 'LR') {
+function createMermaidGraphWriter(targetNode, graphType = 'LR', relationType = null) {
     
     let edgeCounter = 0;
 
     const NODE_BORDER_COLORS = {
-        class: "#006400",
-        include: "#b00060",
-        procedure: "#0033cc",
-        screen: "#b59b00"
+        class: "#0da33f",       // new / class
+        include: "#ed1e97",     // include
+        procedure: "#1d6be0",   // run / invoke
+        screen: "#e0781c"       // screen
+    };
+
+    const LINK_COLORS = {
+        include: "#ed1e97",
+        run: "#1d6be0",
+        invoke: "#1d6be0",
+        inherits: "#18e2ce",
+        implements: "#1fcce2",
+        circular: "#ff0000"
     };
 
     let mermaidGraph = `graph ${graphType};\n`;
@@ -194,7 +404,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     const declaredNodes = new Set();
 
     function getMermaidNodeId(fileName) {
-        return String(fileName || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
+        return toMermaidNodeId(fileName);
     }
 
     function getNodePrefix(node) {
@@ -289,9 +499,55 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         return nodeId;
     }
 
-    function resolveEdgeColor(sourceType) {
+    function normalizeLinkType(linkType) {
+        if (!linkType) {
+            return "";
+        }
 
-        return NODE_BORDER_COLORS[sourceType] || "#333";
+        return String(linkType)
+            .split(":")[0]
+            .trim()
+            .toLowerCase();
+    }
+
+    function resolveEdgeColor(linkTypeInput) {
+        if (!linkTypeInput) {
+            return "#555";
+        }
+
+        const values = Array.isArray(linkTypeInput)
+            ? linkTypeInput
+            : (linkTypeInput instanceof Set ? Array.from(linkTypeInput) : [linkTypeInput]);
+
+        const normalizedTypes = Array.from(new Set(
+            values
+                .map(normalizeLinkType)
+                .filter(Boolean)
+        ));
+
+        if (normalizedTypes.length === 0) {
+            return "#555";
+        }
+
+        // run and invoke are intentionally rendered with the same color.
+        const collapsedTypes = Array.from(new Set(
+            normalizedTypes.map((type) => (type === "invoke" ? "run" : type))
+        ));
+
+        if (collapsedTypes.includes("circular")) {
+            return LINK_COLORS.circular;
+        }
+
+        if (collapsedTypes.length === 1) {
+            const singleType = collapsedTypes[0];
+            if (singleType === "extends") {
+                return LINK_COLORS.inherits;
+            }
+            return LINK_COLORS[singleType] || "#555";
+        }
+
+        // Mixed relationship types on the same edge -> undefined/multiple color.
+        return "#555";
     }
 
     function lightenColor(hex, percent) {
@@ -316,7 +572,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     mermaidGraph +=
     `    style ${startNodeName} fill:#1f6feb,stroke:${startBorder},stroke-width:4px,color:#ffffff,rx:5px,ry:5px\n`;    
 
-    function addEdge(sourceNode, destNode, label) {
+    function addEdge(sourceNode, destNode, label, edgeLinkType = null) {
 
         if (!sourceNode || !destNode) {
             return;
@@ -329,10 +585,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         const sourceId = getMermaidNodeId(sourceNode.FileName);
         const destId = getMermaidNodeId(destNode.FileName);
 
-        const sourceType = resolveNodeType(sourceNode);
-        const targetType = resolveNodeType(destNode);
-
-        const color = resolveEdgeColor(targetType);
+        const color = resolveEdgeColor(edgeLinkType || relationType || label);
 
         const safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
 
@@ -361,5 +614,14 @@ module.exports = {
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,
-    runABLScript
+    runABLScript,
+    toMermaidNodeId,
+    getDsMapArray,
+    getFirstLinkTypeEntry,
+    collectDirectionalLinks,
+    collectBidirectionalLinks,
+    dedupeLinks,
+    buildLinkEdgeMap,
+    getCircularEdgeKeys,
+    renderSortedEdges
 };

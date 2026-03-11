@@ -1,4 +1,10 @@
-const { generateDiagram, createMermaidGraphWriter } = require('./diagramCommon');
+const {
+    generateDiagram,
+    createMermaidGraphWriter,
+    collectDirectionalLinks,
+    buildLinkEdgeMap,
+    renderSortedEdges
+} = require('./diagramCommon');
 
 async function generateCallDiagram(context, uri, deps) {
     return generateDiagram(context, uri, deps, 'call', generateMermaidCallGraph);
@@ -15,42 +21,25 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
         return null;
     }
 
-    const linksToRender = new Set();
-
     function filterCallLinks(link) {
         if (!link || !link.LinkType) return false;
         const lt = link.LinkType.toLowerCase();
         return lt.startsWith('invoke') || lt.startsWith('run');
     }
 
-    function findCallLinks(nodeId, visitedNodes) {
-        if (!nodeId || visitedNodes.has(nodeId)) {
-            return;
-        }
-        visitedNodes.add(nodeId);
-
-        const childLinks = allFileLinks.filter(link => link.ParentNodeId === nodeId && filterCallLinks(link));
-        childLinks.forEach(link => {
-            linksToRender.add(link);
-            findCallLinks(link.NodeId, visitedNodes);
-        });
-    }
-
-    function findCalledByLinks(nodeId, visitedNodes) {
-        if (!nodeId || visitedNodes.has(nodeId)) {
-            return;
-        }
-        visitedNodes.add(nodeId);
-
-        const parentLinks = allFileLinks.filter(link => link.NodeId === nodeId && filterCallLinks(link));
-        parentLinks.forEach(link => {
-            linksToRender.add(link);
-            findCalledByLinks(link.ParentNodeId, visitedNodes);
-        });
-    }
-
-    findCallLinks(startNodeId, new Set());
-    findCalledByLinks(startNodeId, new Set());
+    const linksToRender = new Set();
+    // Keep historical traversal order for stable label ordering:
+    // first downstream calls, then upstream callers.
+    collectDirectionalLinks(allFileLinks, startNodeId, filterCallLinks, {
+        direction: 'down',
+        visited: new Set(),
+        linksToRender
+    });
+    collectDirectionalLinks(allFileLinks, startNodeId, filterCallLinks, {
+        direction: 'up',
+        visited: new Set(),
+        linksToRender
+    });
 
     if (linksToRender.size === 0) {
         vscode.window.showInformationMessage(`No invoke or run references found for ${targetNode.FileName}.`);
@@ -60,49 +49,27 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
-    const edges = new Map();
-
-    linksToRender.forEach(link => {
-        const sourceNode = allFileNodes.find(f => f.NodeId === link.ParentNodeId);
-        const destNode = allFileNodes.find(f => f.NodeId === link.NodeId);
-
-        if (sourceNode && destNode) {
-            ensureNodeDeclaration(sourceNode);
-            ensureNodeDeclaration(destNode);
-
-            const edgeKey = `${sourceNode.NodeId}->${destNode.NodeId}`;
-            if (!edges.has(edgeKey)) {
-                edges.set(edgeKey, {
-                    sourceNode,
-                    destNode,
-                    labels: new Set()
-                });
+    function extractCallLabel(link) {
+        const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
+        if (rawLinkType.startsWith('invoke:') || rawLinkType.startsWith('run:')) {
+            const parts = rawLinkType.split(':');
+            if (parts.length > 1) {
+                return parts[1].split(',')[0].trim();
             }
-
-            const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
-            let label = '';
-            if (rawLinkType.startsWith('invoke:') || rawLinkType.startsWith('run:')) {
-                // Use the method name after 'invoke:' or 'run:'
-                const parts = rawLinkType.split(':');
-                if (parts.length > 1) {
-                    // Optionally include parameters after comma
-                    label = parts[1].split(',')[0].trim();
-                }
-            } else {
-                label = rawLinkType.split(':')[0].trim();
-            }
-            if (label) {
-                edges.get(edgeKey).labels.add(label);
-            }
+            return '';
         }
+
+        return rawLinkType.split(':')[0].trim();
+    }
+
+    const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
+        includeLabels: true,
+        labelExtractor: extractCallLabel
     });
 
-    Array.from(edges.entries())
-        .sort((a,b) => a[0].localeCompare(b[0]))
-        .forEach(([key, edge]) => {
-            const labels = Array.from(edge.labels).join(', ');
-            addEdge(edge.sourceNode, edge.destNode, labels);
-        });
+    renderSortedEdges(edges, addEdge, {
+        labelBuilder: edge => Array.from(edge.labels).join(', ')
+    });
 
     return getGraph();
 }

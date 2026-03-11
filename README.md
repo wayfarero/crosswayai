@@ -48,6 +48,11 @@ The following commands are available in the Command Palette and via context menu
 
 ## Release Notes
 
+### 1.6.6
+
+- Added legend box in the CrossWayAI Viewer for better reference
+- Added hover functionality over nodes and links + tooltip functionality for links in Call and Impact diagrams, for better visibility
+
 ### 1.6.5
 
 - Added support for new `Package Diagram` diagram type for visualizing the complete package tree structure of a class
