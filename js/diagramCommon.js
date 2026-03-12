@@ -379,7 +379,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     }
 }
 
-function createMermaidGraphWriter(targetNode, graphType = 'LR', relationType = null) {
+function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     
     let edgeCounter = 0;
 

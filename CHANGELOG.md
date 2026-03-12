@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.7
+
+- Bug fixed links tooltip visibility in CrossWayAI Viewer
+- Changed default legend state to collapsed in CrossWayAI Viewer
+- Updated README.md information
+- Fixed cleanup of `.crosswayai/temp` folder after `Dump All DB Definitions` command
+
 ## 1.6.6
 
 - Added legend box in the CrossWayAI Viewer for better reference

@@ -62,6 +62,18 @@ async function dumpAllDBDefinitions(context, deps) {
             await dumpDfFile(context, deps, dbName, workspaceRoot, pfFilePath);
         }
     }
+    
+    // Clean up temp directory after all databases have been processed
+    const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
+    try {
+        if (fs.existsSync(tempDir)) {
+            await fs.promises.rm(tempDir, { recursive: true, force: true });
+            CrossWayAILog.appendLine('Cleaned up temporary directory: ' + tempDir);
+        }
+    } catch (e) {
+        CrossWayAILog.appendLine('>Warning: Failed to clean up temporary directory: ' + e.message);
+    }
+    
     CrossWayAILog.appendLine('Completed dumpAllDBDefinitions.');
     CrossWayAILog.show(true);
 }

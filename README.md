@@ -8,18 +8,19 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 - **Dependency Mapping:** Triggers a deep analysis using an underlying ABL script to generate a dependency map.
 - **Context Menu Integration:** Access diagram generation commands directly from the editor or explorer context menus for quick analysis.
 - **Multiple Diagram Types:** Provides commands to generate various diagrams to visualize your application's architecture, including:
-    - Impact Analysis
+    - Impact Diagram
     - Include Diagram
     - Interface Diagram
     - Inheritance Diagram
     - Call Diagram
-    - Package Diagram
-    - Table Relations Diagram
+    - Package Diagram (AI)
+    - Table Relations Diagram (AI)
 
 ## Requirements
 
 - Progress OpenEdge installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension
+- Windows support only (for now)
 
 
 ## Getting Started
@@ -27,26 +28,51 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 1.  Open your OpenEdge ABL project workspace in VS Code.
 2.  Open the Command Palette (`Ctrl+Shift+P`).
 3.  Run the **"CrossWayAI: Generate Dependency Map"** command.
-4.  This will create a `.crosswayai` directory in your workspace root, generate an initial `dsMap.json` file containing your project's source files, and then execute the backend ABL process for a full analysis.
+    -  This will create a `.crosswayai` directory in your workspace root, generate an initial `dsMap.json` file containing your project's source files, and then execute the backend ABL process for a full analysis.
+
+![Generate Dependency Map](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/dependency.gif)
+
+5.  Run the **"CrossWayAI: Dump All DB Definitions"** command
+    - This will dump all databases configured in the openedge-project.json under the `.crosswayai\dump` directory in your workspace root.
+
+![Dump All DB Definitions](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/dumpalldbdefinitions.gif)
 
 Once the analysis is complete, you can use the other commands to generate specific diagrams.
 
 ## Extension Commands
 
-The following commands are available in the Command Palette and via context menus:
+The following commands are available in the Command Palette :
 
 -   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace projects' files.
--   `CrossWayAI: Dump All DB Definitions`: Helper command to dump the current workspace databases schema definition files in order to enable users to generate table relationship diagrams using the @mermAId chat agent.
+-   `CrossWayAI: Dump All DB Definitions`: Helper command to dump the current workspace databases schema definition files in order to 
+enable users to generate table relationship diagrams using the chat agent.
+
+and via context menus:
+
 -   `Impact Diagram`: Generate an impact analysis diagram for the selected file.
 -   `Include Diagram`: Generate an include diagram for the selected file
 -   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
 -   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
 -   `Package Diagram`: Generate a package diagram for the selected file using chat agent.
+
+![Impact Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/impactdiagram.gif)
+
 -   `Table Relations Diagram`: Generate the selected .df file's tables relations diagram using chat agent
+
+![Table Relations](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/tablerelations.gif)
+
 -   `View diagram`: Open the CrossWayAI viewer for the selected .md file
 
+![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
 ## Release Notes
+
+### 1.6.7
+
+- Bug fixed links tooltip visibility in CrossWayAI Viewer
+- Changed default legend state to collapsed in CrossWayAI Viewer
+- Updated README.md information
+- Fixed cleanup of `.crosswayai/temp` folder after `Dump All DB Definitions` command
 
 ### 1.6.6
 

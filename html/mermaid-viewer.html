@@ -101,8 +101,8 @@
       background: rgba(3,7,18,0.72);
       border: 1px solid #374151;
       border-radius: 8px;
-      padding: 8px 10px;
-      min-width: 220px;
+      padding: 6px 9px;
+      min-width: 0;
       max-width: min(320px, calc(100vw - 20px));
       color: #d1d5db;
       font-size: 12px;
@@ -124,40 +124,20 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      margin-bottom: 6px;
-    }
-    #legend .legend-controls {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    #legend .legend-toggle {
-      width: 20px;
-      height: 18px;
-      border: 1px solid #4b5563;
-      background: #111827;
-      color: #e5e7eb;
-      border-radius: 4px;
-      padding: 0;
-      font-size: 12px;
-      line-height: 1;
-      font-weight: 700;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #legend .legend-toggle:hover {
-      filter: brightness(1.1);
+      margin-bottom: 0;
     }
     #legend .legend-body {
-      display: block;
-    }
-    #legend.collapsed .legend-body {
       display: none;
     }
-    #legend.collapsed .legend-header {
-      margin-bottom: 0;
+    #legend:hover {
+      padding: 8px 10px;
+      min-width: 220px;
+    }
+    #legend:hover .legend-header {
+      margin-bottom: 6px;
+    }
+    #legend:hover .legend-body {
+      display: block;
     }
     #legend .legend-row {
       display: flex;
@@ -262,7 +242,6 @@
     let currentZoom = 1;
     let svgBaseWidth = 0;
     let svgBaseHeight = 0;
-    let isLegendCollapsed = false;
 
     function escapeHtml(text) {
       return String(text || '')
@@ -369,10 +348,6 @@
       legend.innerHTML = [
         '<div class="legend-header">',
         '<div class="legend-title">Legend</div>',
-        '<div class="legend-controls">',
-        '<button type="button" class="legend-toggle legend-minimize" title="Minimize legend" aria-label="Minimize legend">−</button>',
-        '<button type="button" class="legend-toggle legend-expand" title="Expand legend" aria-label="Expand legend">+</button>',
-        '</div>',
         '</div>',
         '<div class="legend-body">',
         buildLegendRow('include', 'include'),
@@ -385,36 +360,8 @@
         '</div>'
       ].join('');
 
-      const minimizeBtn = legend.querySelector('.legend-minimize');
-      const expandBtn = legend.querySelector('.legend-expand');
-      const updateButtons = () => {
-        legend.classList.toggle('collapsed', isLegendCollapsed);
-        if (minimizeBtn) minimizeBtn.style.display = isLegendCollapsed ? 'none' : 'inline-flex';
-        if (expandBtn) expandBtn.style.display = isLegendCollapsed ? 'inline-flex' : 'none';
-      };
-
-      if (minimizeBtn) {
-        minimizeBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          isLegendCollapsed = true;
-          updateButtons();
-        });
-      }
-
-      if (expandBtn) {
-        expandBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          isLegendCollapsed = false;
-          updateButtons();
-        });
-      }
-
-      // Prevent dragging/panning while interacting with legend controls.
-      legend.querySelectorAll('.legend-toggle').forEach((btn) => {
-        btn.addEventListener('mousedown', (event) => event.stopPropagation());
-      });
-
-      updateButtons();
+      // Prevent dragging/panning while interacting with legend.
+      legend.onmousedown = (event) => event.stopPropagation();
       legend.hidden = false;
     }
 
@@ -945,6 +892,9 @@
 
           if (activeSelection && activeSelection.pathElement === edgeEl) {
             clearActiveSelection();
+            window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+            hideEdgeTooltip(true);
+            return;
           } else {
             highlightEdge(edgeEl);
           }
@@ -1104,14 +1054,49 @@
         }
       }
       svg.addEventListener('click', () => {
+        if (window.CROSSWAY_IGNORE_NEXT_SVG_CLICK) {
+          window.CROSSWAY_IGNORE_NEXT_SVG_CLICK = false;
+          return;
+        }
+
+        if (activeSelection && window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+          return;
+        }
 
         window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
-        clearActiveSelection();
         lockedNode = null;
         resetGraphFade(svg);
         hideEdgeTooltip(true);
 
       });
+
+      if (window.CROSSWAY_KEYDOWN_HANDLER) {
+        document.removeEventListener('keydown', window.CROSSWAY_KEYDOWN_HANDLER);
+      }
+      const onKeyDown = (event) => {
+        if (event.key !== 'Escape') {
+          return;
+        }
+
+        const hadActiveEdgeSelection = Boolean(activeSelection);
+        const hadLockedNode = Boolean(lockedNode);
+
+        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearActiveSelection();
+        hideEdgeTooltip(true);
+
+        if (hadLockedNode) {
+          lockedNode = null;
+          resetGraphFade(svg);
+        }
+
+        if (hadActiveEdgeSelection || hadLockedNode) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      };
+      window.CROSSWAY_KEYDOWN_HANDLER = onKeyDown;
+      document.addEventListener('keydown', onKeyDown);
     }
 
     function normalizeErKeySyntax(code) {
@@ -1748,6 +1733,7 @@
 
     // Drag to pan functionality
     let isDragging = false;
+    let didPanDrag = false;
     let dragStartX = 0;
     let dragStartY = 0;
     let dragStartScrollLeft = 0;
@@ -1760,6 +1746,7 @@
       }
 
       isDragging = true;
+      didPanDrag = false;
       dragStartX = event.clientX;
       dragStartY = event.clientY;
       dragStartScrollLeft = stage.scrollLeft;
@@ -1772,13 +1759,20 @@
 
       const deltaX = event.clientX - dragStartX;
       const deltaY = event.clientY - dragStartY;
+      if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+        didPanDrag = true;
+      }
 
       stage.scrollLeft = dragStartScrollLeft - deltaX;
       stage.scrollTop = dragStartScrollTop - deltaY;
     });
 
     document.addEventListener('mouseup', () => {
+      if (isDragging && didPanDrag) {
+        window.CROSSWAY_IGNORE_NEXT_SVG_CLICK = true;
+      }
       isDragging = false;
+      didPanDrag = false;
       stage.classList.remove('dragging');
     });
 
@@ -1786,3 +1780,4 @@
   </script>
 </body>
 </html>
+
