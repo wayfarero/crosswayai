@@ -27,9 +27,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     // Determine whether a ttFileLink entry represents a meaningful
     // dependency for impact analysis.  Impact diagrams should include only
     // links that correspond to actual code relationships (method calls,
-    // include statements, inheritance, etc.).  Incidental or bookkeeping
-    // entries such as "new" are deliberately excluded to keep graphs
-    // focused and readable.
+    // include statements, inheritance, instantiation, etc.).
     function isImpactLink(link) {
         if (!link || !link.LinkType) return false;
         if (link.NodeId && link.ParentNodeId && link.NodeId === link.ParentNodeId) {
@@ -43,7 +41,8 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
             lt.startsWith('public-property:') ||
             lt === 'include' ||
             lt === 'inherits:' ||
-            lt === 'implements:' 
+            lt === 'implements:' ||
+            lt === 'new'
         );
     }
 

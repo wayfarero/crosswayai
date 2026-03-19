@@ -15,6 +15,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Inheritance Diagram
     - Call Diagram
     - Package Diagram
+    - Instance Chain Diagram
     - Table Relations Diagram (AI)
 
 ## Requirements
@@ -56,6 +57,7 @@ and via context menus:
 -   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
 -   `Package Diagram`: Generate a package diagram for the selected file.
+-   `Instance Chain Diagram`: Generate an instantiation chain diagram for the selected file.
 
 ![Impact Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/impactdiagram.gif)
 
@@ -66,7 +68,14 @@ and via context menus:
 -   `View diagram`: Open the CrossWayAI viewer for the selected .md file
 
 ![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
+
 ## Release Notes
+
+### 1.7.1
+
+- Fixed "new" (instantiation) links not showing up on impact diagrams
+- Added new `Instance Chain Diagram` command to visualize instantiation ("new") chains for a selected file
+- Added right-click context menu on diagram nodes in CrossWayAI Viewer with `Open File` action to navigate directly to the source file
 
 ### 1.7.0
 

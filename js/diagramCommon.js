@@ -383,6 +383,11 @@ function getDiagramConfig(diagramType) {
                 persistDiagramType: 'package',
                 errorMessage: 'CrossWayAI: An error occurred during package diagram generation.'
             };
+        case 'instance_chain':
+            return {
+                persistDiagramType: 'instance_chain',
+                errorMessage: 'CrossWayAI: An error occurred during instance chain diagram generation.'
+            };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
     }
@@ -390,7 +395,15 @@ function getDiagramConfig(diagramType) {
 
 async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     const { vscode, CrossWayAILog, openCrosswayAIViewer, persistMermaid, getDsMapArray, path } = deps;
-    const config = getDiagramConfig(diagramType);
+    let config;
+    try {
+        config = getDiagramConfig(diagramType);
+    } catch (error) {
+        CrossWayAILog.appendLine(`**Error: ${error.message}`);
+        CrossWayAILog.show(true);
+        vscode.window.showErrorMessage(error.message);
+        return;
+    }
 
     try {
         const resolvedContext = resolveDiagramContext(context, uri, deps);
@@ -442,6 +455,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     let mermaidGraph = `graph ${graphType};\n`;
 
     const declaredNodes = new Set();
+    const fileMap = {};
 
     function getMermaidNodeId(node) {
         if (!node) {
@@ -565,6 +579,10 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
             writeNode(nodeId, label, nodeType);
 
             declaredNodes.add(nodeId);
+
+            if (node.FilePath) {
+                fileMap[nodeId] = node.FilePath;
+            }
         }
 
         return nodeId;
@@ -675,13 +693,22 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     }
 
     function getGraph() {
+        const serializedFileMap = JSON.stringify(fileMap);
+        if (serializedFileMap && serializedFileMap !== '{}') {
+            return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n${mermaidGraph}`;
+        }
         return mermaidGraph;
+    }
+
+    function getFileMap() {
+        return fileMap;
     }
 
     return {
         ensureNodeDeclaration,
         addEdge,
-        getGraph
+        getGraph,
+        getFileMap
     };
 }
 module.exports = {

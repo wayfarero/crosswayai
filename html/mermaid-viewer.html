@@ -189,6 +189,43 @@
     #edgeTooltip li {
       margin: 2px 0;
     }
+    #nodeContextMenu {
+      position: fixed;
+      z-index: 40;
+      min-width: 160px;
+      background: rgba(3, 7, 18, 0.97);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 4px 0;
+      font-size: 13px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(6px);
+    }
+    #nodeContextMenu[hidden] {
+      display: none;
+    }
+    #nodeContextMenu .ctx-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+    }
+    #nodeContextMenu .ctx-item:hover {
+      background: rgba(59, 130, 246, 0.25);
+    }
+    #nodeContextMenu .ctx-item .ctx-icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
   </style>
 </head>
 <body>
@@ -206,6 +243,7 @@
     <div id="status">Ready.</div>
     <div id="legend" hidden></div>
     <div id="edgeTooltip" hidden></div>
+    <div id="nodeContextMenu" hidden></div>
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -226,6 +264,7 @@
     const diagram = document.getElementById('diagram');
     const legend = document.getElementById('legend');
     const edgeTooltip = document.getElementById('edgeTooltip');
+    const nodeContextMenu = document.getElementById('nodeContextMenu');
 
     const params = new URLSearchParams(window.location.search);
     const defaultMarkdownPath = params.get('file') || '.crosswayai/mermaid/impact_runAnalysis.p.md';
@@ -989,6 +1028,81 @@
       });
 
 
+      // ── Node context menu (right-click) ─────────────────────────────
+      function hideNodeContextMenu() {
+        nodeContextMenu.hidden = true;
+        nodeContextMenu.innerHTML = '';
+      }
+
+      function showNodeContextMenu(nodeId, event) {
+        const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
+
+        nodeContextMenu.innerHTML = '';
+
+        const openFileItem = document.createElement('div');
+        openFileItem.className = 'ctx-item';
+        openFileItem.innerHTML = `<span class="ctx-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 1h7l4 4v10H3V1z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M10 1v4h4" stroke="#9ca3af" stroke-width="1.2" fill="none"/></svg></span><span>Open File</span>`;
+
+        if (filePath) {
+          openFileItem.addEventListener('click', () => {
+            hideNodeContextMenu();
+            window.parent.postMessage({ type: 'openFile', filePath: filePath }, '*');
+          });
+        } else {
+          openFileItem.style.opacity = '0.4';
+          openFileItem.style.cursor = 'default';
+        }
+
+        nodeContextMenu.appendChild(openFileItem);
+
+        // Position the menu
+        const offset = 2;
+        let left = event.clientX + offset;
+        let top = event.clientY + offset;
+        nodeContextMenu.hidden = false;
+
+        // Adjust to keep within viewport
+        requestAnimationFrame(() => {
+          const rect = nodeContextMenu.getBoundingClientRect();
+          if (left + rect.width > window.innerWidth - 8) {
+            left = Math.max(8, event.clientX - rect.width);
+          }
+          if (top + rect.height > window.innerHeight - 8) {
+            top = Math.max(8, event.clientY - rect.height);
+          }
+          nodeContextMenu.style.left = `${left}px`;
+          nodeContextMenu.style.top = `${top}px`;
+        });
+
+        nodeContextMenu.style.left = `${left}px`;
+        nodeContextMenu.style.top = `${top}px`;
+      }
+
+      allNodes.forEach(node => {
+        node.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const nodeId = getNodeIdentity(node);
+          if (!nodeId) return;
+          showNodeContextMenu(nodeId, event);
+        });
+      });
+
+      // Dismiss context menu on clicks/scroll/escape
+      document.addEventListener('click', (event) => {
+        if (!nodeContextMenu.hidden && !nodeContextMenu.contains(event.target)) {
+          hideNodeContextMenu();
+        }
+      }, true);
+
+      stage.addEventListener('scroll', () => {
+        if (!nodeContextMenu.hidden) {
+          hideNodeContextMenu();
+        }
+      });
+      // ── End node context menu ───────────────────────────────────────
+
+
       function highlightArrow(pathElement, pathId, color, svgElement) {
         const originalStroke = pathElement.getAttribute('stroke') || '#000';
         const originalStrokeWidth = pathElement.getAttribute('stroke-width') || '2';
@@ -1091,6 +1205,9 @@
           return;
         }
 
+        const hadContextMenu = !nodeContextMenu.hidden;
+        hideNodeContextMenu();
+
         const hadActiveEdgeSelection = Boolean(activeSelection);
         const hadLockedNode = Boolean(lockedNode);
 
@@ -1103,7 +1220,7 @@
           resetGraphFade(svg);
         }
 
-        if (hadActiveEdgeSelection || hadLockedNode) {
+        if (hadContextMenu || hadActiveEdgeSelection || hadLockedNode) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -1494,6 +1611,7 @@
       window.CROSSWAY_PARENT_MAP = {};
       window.CROSSWAY_SOURCE_NODE = null;
       window.CROSSWAY_EDGE_DETAILS = {};
+      window.CROSSWAY_FILE_MAP = {};
       const sourceNodeMatch = (code || '').match(/^\s*%%CROSSWAY_SOURCE_NODE:(.*)$/m);
       if (sourceNodeMatch) {
         window.CROSSWAY_SOURCE_NODE = sourceNodeMatch[1].trim() || null;
@@ -1514,6 +1632,14 @@
           window.CROSSWAY_EDGE_DETAILS = {};
         }
       }
+      const fileMapMatch = (code || '').match(/^\s*%%CROSSWAY_FILE_MAP:(.*)$/m);
+      if (fileMapMatch) {
+        try {
+          window.CROSSWAY_FILE_MAP = JSON.parse(fileMapMatch[1]);
+        } catch {
+          window.CROSSWAY_FILE_MAP = {};
+        }
+      }
 
       if (!mermaidCode) {
         diagram.innerHTML = '';
@@ -1530,6 +1656,8 @@
         diagram.innerHTML = '';
         window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
         hideEdgeTooltip(true);
+        nodeContextMenu.hidden = true;
+        nodeContextMenu.innerHTML = '';
         const id = 'm' + Date.now();
         const result = await mermaid.render(id, mermaidCode);
         diagram.innerHTML = result.svg;

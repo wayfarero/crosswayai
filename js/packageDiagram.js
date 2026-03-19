@@ -79,6 +79,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
 
         classes.push({
             fileName: node.FileName,
+            filePath: node.FilePath || '',
             className,
             classSimpleName,
             packagePath: parentPath
@@ -92,6 +93,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
 
     let mermaidGraph = 'graph TD;\n';
     const declaredNodes = new Set();
+    const fileMap = {};
     let edgeCounter = 0;
     const edgeStyleIndices = new Map();
 
@@ -260,6 +262,10 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
         .forEach(cls => {
             const classKey = `${cls.className}|${cls.fileName || ''}`;
             const classId = classNodeId(classKey);
+
+            if (cls.filePath) {
+                fileMap[classId] = cls.filePath;
+            }
             const branchKey = cls.packagePath.split('.').length === 1
                 ? cls.packagePath
                 : cls.packagePath.split('.').slice(0, 2).join('.');
@@ -290,6 +296,10 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
 
     appendBatchedLinkStyles();
 
+    const serializedFileMap = JSON.stringify(fileMap);
+    if (serializedFileMap && serializedFileMap !== '{}') {
+        return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n${mermaidGraph}`;
+    }
     return mermaidGraph;
 }
 

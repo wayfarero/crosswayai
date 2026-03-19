@@ -69,6 +69,7 @@ function createMermaidViewer(deps) {
 <body>
     <iframe id="viewerFrame" src="about:blank"></iframe>
     <script>
+        const vscodeApi = acquireVsCodeApi();
         const frame = document.getElementById('viewerFrame');
         function navigate(url) {
             if (typeof url !== 'string' || !url) {
@@ -83,6 +84,9 @@ function createMermaidViewer(deps) {
             const message = event.data || {};
             if (message.type === 'navigate') {
                 navigate(message.url);
+            }
+            if (message.type === 'openFile' && message.filePath) {
+                vscodeApi.postMessage({ type: 'openFile', filePath: message.filePath });
             }
         });
     </script>
@@ -453,6 +457,20 @@ function createMermaidViewer(deps) {
                     activeMarkdownRelativePath = null;
                     activeMarkdownFullPath = null;
                     mermaidViewerPanel = null;
+                });
+
+                mermaidViewerPanel.webview.onDidReceiveMessage((message) => {
+                    if (message.type === 'openFile' && message.filePath) {
+                        const filePath = message.filePath;
+                        const fileUri = vscode.Uri.file(filePath);
+                        vscode.workspace.openTextDocument(fileUri).then(
+                            (doc) => vscode.window.showTextDocument(doc, vscode.ViewColumn.One),
+                            (err) => {
+                                CrossWayAILog.appendLine(`Failed to open file: ${filePath} - ${err.message}`);
+                                vscode.window.showErrorMessage(`CrossWayAI: Could not open file: ${path.basename(filePath)}`);
+                            }
+                        );
+                    }
                 });
 
                 mermaidViewerPanel.webview.html = getMermaidViewerHostHtml(url);

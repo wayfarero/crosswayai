@@ -9,6 +9,7 @@ const { generateInterfaceDiagram } = require('./interfaceDiagram');
 const { generateCallDiagram } = require('./callDiagram');
 const { generateInheritanceDiagram } = require('./inheritanceDiagram');
 const { generatePackageDiagram } = require('./packageDiagram');
+const { generateInstanceChainDiagram } = require('./instanceChainDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
@@ -53,6 +54,7 @@ function activate(context) {
     const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
     const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
     const handlePackageDiagram = (ctx, uri) => generatePackageDiagram(ctx, uri, getDiagramDeps());
+    const handleInstanceChainDiagram = (ctx, uri) => generateInstanceChainDiagram(ctx, uri, getDiagramDeps());
     const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri, getCommonDeps());
     const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getCommonDeps(), dbName, workspaceRoot, pfFilePath);
     const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getCommonDeps());
@@ -68,7 +70,8 @@ function activate(context) {
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
         { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram },
-        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram }
+        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram },
+        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram }
     ];
 
     commands.forEach(command => {
