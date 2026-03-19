@@ -215,6 +215,7 @@
       theme: 'default',
       securityLevel: 'loose',
       deterministicIds: true,
+      maxTextSize: 1000000,
       er: {
         layoutDirection: 'LR'
       }
@@ -801,19 +802,31 @@
         return Array.from(unique);
       }
 
-      function filterTooltipCallItems(values) {
-        const blocked = new Set([
-          'include',
-          'inherits',
-          'implements',
+    function filterTooltipCallItems(values) {
+      const blocked = new Set([
+        'include',
+        'inherits',
+        'implements',
           'extends',
           'circular',
           'undefined',
-          'multiple'
-        ]);
+        'multiple'
+      ]);
 
-        return toUniqueList(values).filter((item) => !blocked.has(item.toLowerCase()));
-      }
+      return toUniqueList(values).filter((item) => {
+        const lower = item.toLowerCase();
+        if (blocked.has(lower)) {
+          return false;
+        }
+
+        // Show tooltip only for explicit RUN procedure targets (path-like .p/.w).
+        const normalized = lower.replace(/\//g, '\\');
+        const isProcedureFile = normalized.endsWith('.p') || normalized.endsWith('.w');
+        const isPathLike = normalized.includes('\\');
+
+        return isProcedureFile && isPathLike;
+      });
+    }
 
       function getEdgeTooltipItems(edgeEl, edgeElementOrder, fallbackLabelsByEdge) {
         const edgeIds = getEdgeIdentity(edgeEl);

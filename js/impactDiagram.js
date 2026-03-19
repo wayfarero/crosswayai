@@ -32,14 +32,18 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     // focused and readable.
     function isImpactLink(link) {
         if (!link || !link.LinkType) return false;
+        if (link.NodeId && link.ParentNodeId && link.NodeId === link.ParentNodeId) {
+            return false;
+        }
         const lt = link.LinkType.toLowerCase();
-        // filter by well‑known link type prefixes or exact types
+        // filter by well-known link type prefixes or exact types
         return (
             lt.startsWith('invoke') ||
             lt.startsWith('run') ||
+            lt.startsWith('public-property:') ||
             lt === 'include' ||
             lt === 'inherits:' ||
-            lt === 'extends:'
+            lt === 'implements:' 
         );
     }
 
@@ -139,8 +143,8 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     Array.from(edges.entries())
         .sort((a, b) => a[0].localeCompare(b[0]))
         .forEach(([, edge]) => {
-        const sourceNodeId = toMermaidNodeId(edge.sourceNode.FileName);
-        const destNodeId = toMermaidNodeId(edge.destNode.FileName);
+        const sourceNodeId = toMermaidNodeId(edge.sourceNode.NodeId || edge.sourceNode.FilePath || edge.sourceNode.FileName);
+        const destNodeId = toMermaidNodeId(edge.destNode.NodeId || edge.destNode.FilePath || edge.destNode.FileName);
         const metadataKey = `${sourceNodeId}->${destNodeId}`;
         const details = Array.from(edge.detailLabels)
             .map(item => String(item || '').replace(/\r?\n/g, ' ').trim())

@@ -1,3 +1,35 @@
+const path = require('path');
+
+/**
+ * Resolves the workspace root directory from the available workspace folders.
+ * If there is only one folder, uses its path directly.
+ * If the first folder is a parent of other folders, uses path.dirname of a subfolder.
+ * Otherwise, uses path.dirname of the first folder.
+ */
+function resolveWorkspaceRoot(workspaceFolders) {
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        return '';
+    }
+
+    const firstFolderPath = workspaceFolders[0].uri.fsPath;
+
+    if (workspaceFolders.length === 1) {
+        return firstFolderPath;
+    }
+
+    const otherFolders = workspaceFolders.slice(1);
+    const isFirstFolderParent = otherFolders.some(folder => {
+        const relative = path.relative(firstFolderPath, folder.uri.fsPath);
+        return relative && !relative.startsWith('..');
+    });
+
+    if (isFirstFolderParent) {
+        return path.dirname(otherFolders[0].uri.fsPath);
+    }
+
+    return path.dirname(firstFolderPath);
+}
+
 /**
  * Runs an ABL script using the provided parameters.
  * @param {Object} options - Options for running the ABL script.
@@ -65,8 +97,8 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
     });
 }
 
-function toMermaidNodeId(fileName) {
-    return String(fileName || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
+function toMermaidNodeId(value) {
+    return String(value || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
 function getDsMapArray(dsMap, tableName) {
@@ -253,7 +285,8 @@ function renderSortedEdges(edges, addEdge, {
 }
 
 function prependSourceMetadata(graph, targetNode) {
-    const sourceNodeId = toMermaidNodeId(targetNode && targetNode.FileName ? targetNode.FileName : 'unknown');
+    const sourceNodeKey = targetNode && (targetNode.NodeId || targetNode.FilePath || targetNode.FileName);
+    const sourceNodeId = toMermaidNodeId(sourceNodeKey || 'unknown');
     const sourceLine = `%%CROSSWAY_SOURCE_NODE:${sourceNodeId}`;
     const graphText = typeof graph === 'string' ? graph : String(graph || '');
 
@@ -285,7 +318,7 @@ function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
         return null;
     }
 
-    const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    const workspaceRoot = resolveWorkspaceRoot(workspaceFolders);
     const dsMapPath = path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
 
     if (!fs.existsSync(dsMapPath)) {
@@ -304,7 +337,8 @@ function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
         return null;
     }
 
-    const targetNode = fileNodes.find(node => node.FilePath && node.FilePath.toLowerCase() === filePath.toLowerCase());
+    const normalizedFilePath = path.normalize(filePath);
+    const targetNode = fileNodes.find(node => node.FilePath && path.normalize(node.FilePath).toLowerCase() === normalizedFilePath.toLowerCase());
     if (!targetNode) {
         vscode.window.showInformationMessage(`File ${path.basename(filePath)} not found in dsMap.json.`);
         return null;
@@ -344,13 +378,18 @@ function getDiagramConfig(diagramType) {
                 persistDiagramType: 'inheritance',
                 errorMessage: 'CrossWayAI: An error occurred during inheritance diagram generation.'
             };
+        case 'package':
+            return {
+                persistDiagramType: 'package',
+                errorMessage: 'CrossWayAI: An error occurred during package diagram generation.'
+            };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
     }
 }
 
 async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
-    const { vscode, CrossWayAILog, openCrosswayAIViewer, persistMermaid, getDsMapArray } = deps;
+    const { vscode, CrossWayAILog, openCrosswayAIViewer, persistMermaid, getDsMapArray, path } = deps;
     const config = getDiagramConfig(diagramType);
 
     try {
@@ -360,7 +399,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
         }
 
         const { dsMap, targetNode, workspaceRoot } = resolvedContext;
-        const mermaidGraph = graphBuilder(dsMap, targetNode, { vscode, getDsMapArray });
+        const mermaidGraph = graphBuilder(dsMap, targetNode, { vscode, getDsMapArray, workspaceRoot, path });
 
         if (!mermaidGraph) {
             return;
@@ -382,6 +421,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
 function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     
     let edgeCounter = 0;
+    const MAX_EDGE_LABEL_LENGTH = 120;
 
     const NODE_BORDER_COLORS = {
         class: "#0da33f",       // new / class
@@ -403,8 +443,12 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 
     const declaredNodes = new Set();
 
-    function getMermaidNodeId(fileName) {
-        return toMermaidNodeId(fileName);
+    function getMermaidNodeId(node) {
+        if (!node) {
+            return toMermaidNodeId('unknown');
+        }
+
+        return toMermaidNodeId(node.NodeId || node.FilePath || node.FileName || 'unknown');
     }
 
     function getNodePrefix(node) {
@@ -415,23 +459,50 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         const prefix = getNodePrefix(node);
         const firstLine = prefix ? `${prefix}${node.FileName}` : node.FileName;
         const relPath = node.FileRelPath || '';
+        const projectName = node.project || node.Project || '';
+        const sourceName = node.source || node.Source || '';
 
-        let displayPath = '';
+        const isStartNode = Boolean(
+            targetNode &&
+            ((node.NodeId && targetNode.NodeId && node.NodeId === targetNode.NodeId) ||
+                (node.FilePath && targetNode.FilePath &&
+                    path.normalize(node.FilePath).toLowerCase() === path.normalize(targetNode.FilePath).toLowerCase()))
+        );
 
+        // Derive the folder path relative to project\source\ by stripping both prefixes
+        // from FileRelPath, then dropping the trailing filename segment.
+        // Result format: [project subpath]\(source directory)\relative folder path
+        let relFolder = '';
         if (relPath) {
-            const lastSep = relPath.lastIndexOf('\\');
-            const folderPath = lastSep !== -1 ? relPath.substring(0, lastSep) : relPath;
-
-            if (folderPath) {
-                displayPath = `(${folderPath})`;
+            let stripped = relPath;
+            if (projectName) {
+                const projectPrefix = projectName + '\\';
+                if (stripped.toLowerCase().startsWith(projectPrefix.toLowerCase())) {
+                    stripped = stripped.slice(projectPrefix.length);
+                }
             }
+            if (sourceName) {
+                const sourcePrefix = sourceName + '\\';
+                if (stripped.toLowerCase().startsWith(sourcePrefix.toLowerCase())) {
+                    stripped = stripped.slice(sourcePrefix.length);
+                }
+            }
+            const lastSep = stripped.lastIndexOf('\\');
+            relFolder = lastSep !== -1 ? stripped.substring(0, lastSep) : '';
         }
 
         const escapedFirst = firstLine.replace(/"/g, '\\"');
-        const escapedRel = displayPath.replace(/"/g, '\\"');
+        const escapedProject = projectName
+            ? `<span style='color:#f59e0b'>[${projectName}]</span>`.replace(/"/g, '\\"')
+            : '';
+        const escapedSource = sourceName
+            ? (`<span style='color:${isStartNode ? '#f9a8d4' : '#ec4899'}'>(${sourceName})</span>`).replace(/"/g, '\\"')
+            : '';
+        const escapedRelFolder = relFolder.replace(/"/g, '\\"');
 
-        if (escapedRel) {
-            return `${escapedFirst}\\n${escapedRel}`;
+        const parts = [escapedProject, escapedSource, escapedRelFolder].filter(Boolean);
+        if (parts.length > 0) {
+            return `${escapedFirst}\\n${parts.join('\\')}`;
         }
 
         return escapedFirst;
@@ -484,7 +555,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
             return null;
         }
 
-        const nodeId = getMermaidNodeId(node.FileName);
+        const nodeId = getMermaidNodeId(node);
 
         if (!declaredNodes.has(nodeId)) {
 
@@ -582,12 +653,15 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
             return;
         }
 
-        const sourceId = getMermaidNodeId(sourceNode.FileName);
-        const destId = getMermaidNodeId(destNode.FileName);
+        const sourceId = getMermaidNodeId(sourceNode);
+        const destId = getMermaidNodeId(destNode);
 
         const color = resolveEdgeColor(edgeLinkType || relationType || label);
 
-        const safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
+        let safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
+        if (safeLabel.length > MAX_EDGE_LABEL_LENGTH) {
+            safeLabel = `${safeLabel.slice(0, MAX_EDGE_LABEL_LENGTH - 1)}...`;
+        }
 
         if (safeLabel) {
             mermaidGraph += `    ${sourceId} -->|${safeLabel}| ${destId};\n`;
@@ -611,6 +685,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     };
 }
 module.exports = {
+    resolveWorkspaceRoot,
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,

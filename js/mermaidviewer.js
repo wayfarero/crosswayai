@@ -1,3 +1,5 @@
+const { resolveWorkspaceRoot } = require('./diagramCommon');
+
 function createMermaidViewer(deps) {
     const { vscode, fs, path, http, CrossWayAILog } = deps;
 
@@ -143,15 +145,15 @@ function createMermaidViewer(deps) {
         })();
     }
 
-    function updateMarkdownWatcher(workspaceFolder, targetMdRelPath) {
+    function updateMarkdownWatcher(workspaceRoot, targetMdRelPath) {
         disposeMarkdownWatcher();
 
-        if (!workspaceFolder || !targetMdRelPath) {
+        if (!workspaceRoot || !targetMdRelPath) {
             return;
         }
 
         const normalizedRelPath = targetMdRelPath.split(path.sep).join('/');
-        const filePattern = new vscode.RelativePattern(workspaceFolder, normalizedRelPath);
+        const filePattern = new vscode.RelativePattern(workspaceRoot, normalizedRelPath);
         markdownFileWatcher = vscode.workspace.createFileSystemWatcher(filePattern, false, false, false);
 
         markdownFileWatcher.onDidChange(() => queueViewerRefresh());
@@ -405,8 +407,11 @@ function createMermaidViewer(deps) {
             return;
         }
 
-        const workspaceFolder = workspaceFolders[0];
-        const workspaceRoot = workspaceFolder.uri.fsPath;
+        const workspaceRoot = resolveWorkspaceRoot(workspaceFolders);
+        if (!workspaceRoot) {
+            vscode.window.showErrorMessage('CrossWayAI: Unable to resolve workspace root.');
+            return;
+        }
         const extensionRoot = context && context.extensionPath ? context.extensionPath : path.resolve(__dirname, '..');
         const viewerPath = path.join(extensionRoot, 'html', 'mermaid-viewer.html');
         if (!fs.existsSync(viewerPath)) {
@@ -458,7 +463,7 @@ function createMermaidViewer(deps) {
                 await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url });
             }
 
-            updateMarkdownWatcher(workspaceFolder, targetMdRelPath);
+            updateMarkdownWatcher(workspaceRoot, targetMdRelPath);
 
             if (!fs.existsSync(targetMdFullPath)) {
                 vscode.window.showInformationMessage(`CrossWayAI: Viewer opened. Target markdown not found: ${targetMdRelPath}`);

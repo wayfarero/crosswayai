@@ -2,6 +2,7 @@ const {
     generateDiagram,
     createMermaidGraphWriter,
     collectBidirectionalLinks,
+    collectDirectionalLinks,
     dedupeLinks,
     buildLinkEdgeMap,
     renderSortedEdges
@@ -19,51 +20,62 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'B
     function linkIsInheritance(link) {
         if (!link || !link.LinkType) return false;
         const lt = link.LinkType.toLowerCase();
-        // Include inheritance relationships ('extends', 'inherits')
-        return lt === 'extends:' || lt === 'inherits:';
+        // Include inheritance relationships ('inherits')
+        return  lt === 'inherits:';
     }
 
     const linksToRender = collectBidirectionalLinks(allFileLinks, startNodeId, linkIsInheritance);
 
-    // Also use ttClassReference (if present) to ensure we discover all inheritance relationships
-    const classRefs = (dsMap.dsMap.ttClassReference || []);
-    const classNameToNodeId = {};
-    allFileNodes.forEach(n => { if (n.ClassName) classNameToNodeId[n.ClassName] = n.NodeId; });
+    // Expand like the prior ttClassReference logic, but strictly from ttFileLink:
+    // for each ancestor the start node inherits from, include that ancestor's full inheritor tree,
+    // then recurse to the ancestor's own ancestor chain.
+    const ancestorVisited = new Set();
+    const downVisited = new Set();
+    const reverseDownVisited = new Set();
+    const sameNode = (a, b) => String(a) === String(b);
 
-    if (targetNode.ClassName) {
-        const startClassName = targetNode.ClassName;
-        // find classes/procedures that the start class extends or inherits from
-        classRefs.forEach(ref => {
-            if (ref.ClassName === startClassName && ref.ReferenceType && 
-                (ref.ReferenceType.toLowerCase().indexOf('extends') !== -1 || 
-                 ref.ReferenceType.toLowerCase().indexOf('inherits') !== -1)) {
-                const parentClassName = ref.TargetClassName;
-                const parentNodeId = classNameToNodeId[parentClassName];
-                if (parentNodeId) {
-                    // add link from child to parent
-                    linksToRender.add({ ParentNodeId: startNodeId, NodeId: parentNodeId, LinkType: ref.ReferenceType });
+    function expandAncestorInheritanceTree(nodeId) {
+        if (!nodeId || ancestorVisited.has(nodeId)) {
+            return;
+        }
 
-                    // add links from all other classes that inherit from the same parent
-                    classRefs.forEach(ref2 => {
-                        if (ref2.TargetClassName === parentClassName && 
-                            (ref2.ReferenceType.toLowerCase().indexOf('extends') !== -1 || 
-                             ref2.ReferenceType.toLowerCase().indexOf('inherits') !== -1)) {
-                            const childNodeId = classNameToNodeId[ref2.ClassName];
-                            if (childNodeId) {
-                                linksToRender.add({ ParentNodeId: childNodeId, NodeId: parentNodeId, LinkType: ref2.ReferenceType });
-                            }
-                        }
-                    });
+        ancestorVisited.add(nodeId);
 
-                    // also collect up via existing links to catch any other inheritance chains
-                    collectBidirectionalLinks(allFileLinks, parentNodeId, linkIsInheritance, {
-                        linksToRender,
-                        downVisited: new Set([parentNodeId])
-                    });
-                }
+        collectDirectionalLinks(allFileLinks, nodeId, linkIsInheritance, {
+            direction: 'down',
+            visited: downVisited,
+            linksToRender,
+            looseEquality: true
+        });
+
+        // Defensive pass for maps that encode inheritance in reverse orientation.
+        collectDirectionalLinks(allFileLinks, nodeId, linkIsInheritance, {
+            direction: 'up',
+            visited: reverseDownVisited,
+            linksToRender,
+            looseEquality: true
+        });
+
+        allFileLinks.forEach(link => {
+            if (!linkIsInheritance(link)) {
+                return;
+            }
+
+            // Parent -> Child orientation: current node inherits from Parent.
+            if (sameNode(link.NodeId, nodeId)) {
+                linksToRender.add(link);
+                expandAncestorInheritanceTree(link.ParentNodeId);
+            }
+
+            // Child -> Parent orientation: current node inherits from NodeId.
+            if (sameNode(link.ParentNodeId, nodeId)) {
+                linksToRender.add(link);
+                expandAncestorInheritanceTree(link.NodeId);
             }
         });
     }
+
+    expandAncestorInheritanceTree(startNodeId);
 
     const hasOutgoingLinks = Array.from(linksToRender).some(link => link.ParentNodeId === startNodeId);
     const hasIncomingLinks = Array.from(linksToRender).some(link => link.NodeId === startNodeId);
@@ -76,7 +88,7 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'B
         return graphWriter.getGraph();
     }
 
-    // Deduplicate links by (parent,node,linkType) key to avoid rendering duplicates from mixed sources
+    // Deduplicate links by (parent,node,linkType) key to avoid rendering duplicates
     const deduped = dedupeLinks(Array.from(linksToRender), link =>
         `${link.ParentNodeId}::${link.NodeId}::${(link.LinkType || '').toString()}`
     );
