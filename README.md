@@ -65,11 +65,15 @@ and via context menus:
 
 ![Table Relations](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/tablerelations.gif)
 
--   `View diagram`: Open the CrossWayAI viewer for the selected .md file
+-   `View diagram`: Open the CrossWayAI Viewer for the selected .md file
 
 ![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
 
 ## Release Notes
+
+### 1.7.2
+
+- Added support for searching nodes in CrossWayAI Viewer
 
 ### 1.7.1
 

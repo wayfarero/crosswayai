@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2
+
+- Added support for searching nodes in CrossWayAI Viewer
+
 ## 1.7.1
 
 - Fixed "new" (instantiation) links not showing up on impact diagrams

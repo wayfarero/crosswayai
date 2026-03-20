@@ -226,6 +226,33 @@
       align-items: center;
       justify-content: center;
     }
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #nodeSearch {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid #4b5563;
+      border-radius: 6px;
+      color: #e5e7eb;
+      padding: 5px 8px;
+      font-size: 13px;
+      width: 160px;
+      outline: none;
+    }
+    #nodeSearch:focus {
+      border-color: #3b82f6;
+    }
+    #nodeSearch::placeholder {
+      color: #6b7280;
+    }
+    #searchCount {
+      color: #9ca3af;
+      font-size: 11px;
+      min-width: 20px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -234,6 +261,10 @@
       <div id="diagram"></div>
     </div>
     <div class="overlay">
+      <div class="search-box">
+        <input id="nodeSearch" type="text" placeholder="Search nodes..." autocomplete="off" spellcheck="false" />
+        <span id="searchCount"></span>
+      </div>
       <button id="exportPng">Export Image</button>
       <button id="zoomIn">+</button>
       <button id="zoomOut">-</button>
@@ -846,9 +877,8 @@
         'include',
         'inherits',
         'implements',
-          'extends',
-          'circular',
-          'undefined',
+        'circular',
+        'undefined',
         'multiple'
       ]);
 
@@ -976,8 +1006,8 @@
         });
       });
 
-      const allNodes = svg.querySelectorAll('.node');
-      
+      const allNodes = svg.querySelectorAll('.node'); 
+
       allNodes.forEach(node => {
 
         node.addEventListener('mouseenter', () => {
@@ -996,10 +1026,6 @@
           if (lockedNode) return;
           resetGraphFade(svg);
         });
-
-      });
-      
-      allNodes.forEach(node => {
 
         node.addEventListener('click', (event) => {
 
@@ -1024,8 +1050,10 @@
           fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
 
         });
+        
 
       });
+      
 
 
       // ── Node context menu (right-click) ─────────────────────────────
@@ -1658,11 +1686,26 @@
         hideEdgeTooltip(true);
         nodeContextMenu.hidden = true;
         nodeContextMenu.innerHTML = '';
+        searchHighlightedNodes = [];
+        searchCountEl.textContent = '';
         const id = 'm' + Date.now();
         const result = await mermaid.render(id, mermaidCode);
         diagram.innerHTML = result.svg;
 
+        // Post-process SVG: assign .node class to all <g> elements with a <text> child
+        const svg = diagram.querySelector('svg');
+        if (svg) {
+          Array.from(svg.querySelectorAll('g')).forEach(g => {
+            if (g.querySelector('text')) {
+              g.classList.add('node');
+            }
+          });
+        }
+
         activateDiagramSizing();
+        if (nodeSearchInput.value.trim()) {
+          applySearchHighlights(nodeSearchInput.value.trim());
+        }
         setStatus('Rendered. Use controls to navigate.');
       } catch (err) {
         setStatus('Render failed: ' + (err && err.message ? err.message : String(err)), true);
@@ -1862,6 +1905,106 @@
     document.getElementById('zoomOut').addEventListener('click', () => applyZoom(currentZoom / 1.2, true));
     document.getElementById('fit').addEventListener('click', fitDiagramToViewport);
     document.getElementById('reset').addEventListener('click', () => applyZoom(1, true));
+
+    // Node search functionality
+    const nodeSearchInput = document.getElementById('nodeSearch');
+    const searchCountEl = document.getElementById('searchCount');
+    let searchHighlightedNodes = [];
+
+    function clearSearchHighlights() {
+      searchHighlightedNodes.forEach(({ node, originalFill, originalStyleFill }) => {
+        const rect = node.querySelector('rect, polygon, circle, ellipse, path');
+        if (rect) {
+          if (originalFill !== null) {
+            rect.setAttribute('fill', originalFill);
+          } else {
+            rect.removeAttribute('fill');
+          }
+          // Restore style fill
+          if (originalStyleFill !== undefined) {
+            rect.style.fill = originalStyleFill;
+          } else {
+            rect.style.fill = '';
+          }
+        }
+      });
+      searchHighlightedNodes = [];
+      searchCountEl.textContent = '';
+    }
+
+    function stripPrefixToken(text) {
+      // Remove known prefixes (case-insensitive)
+      return text.replace(/^(class|include|procedure|screen):\s*/i, '').trim();
+    }
+
+    function applySearchHighlights(query) {
+      clearSearchHighlights();
+
+      if (!query) {
+        return;
+      }
+
+      const svg = diagram.querySelector('svg');
+      if (!svg) {
+        return;
+      }
+
+      const lowerQuery = query.toLowerCase();
+      const allNodes = svg.querySelectorAll('.node');
+      let matchCount = 0;
+
+      allNodes.forEach(node => {
+        // Try <span class='nodeLabel'> first, fallback to <text>
+        let labelEl = node.querySelector('span.nodeLabel');
+        if (!labelEl) labelEl = node.querySelector('text');
+        if (!labelEl) return;
+
+        let nodeText = (labelEl.textContent || '').trim();
+        nodeText = stripPrefixToken(nodeText);
+        const firstLine = nodeText.split('\n')[0].trim().toLowerCase();
+        if (firstLine.includes(lowerQuery)) {
+          // Do not highlight referenced file node
+          let isReferencedFileNode = false;
+          if (window.CROSSWAY_SOURCE_NODE) {
+            // Try to match node id or label
+            const nodeId = node.getAttribute('data-id') || node.id || '';
+            if (nodeId && String(nodeId).replace(/[^a-zA-Z0-9_]/g, '') === String(window.CROSSWAY_SOURCE_NODE).replace(/[^a-zA-Z0-9_]/g, '')) {
+              isReferencedFileNode = true;
+            }
+          }
+          if (!isReferencedFileNode) {
+            const rect = node.querySelector('rect, polygon, circle, ellipse, path');
+            if (rect) {
+              const originalFill = rect.hasAttribute('fill') ? rect.getAttribute('fill') : null;
+              const originalStyleFill = rect.style.fill;
+              searchHighlightedNodes.push({ node, originalFill, originalStyleFill });
+              rect.setAttribute('fill', '#a7f3d0'); // pale green
+              rect.style.fill = '#a7f3d0'; // pale green
+              matchCount++;
+            }
+          }
+        }
+      });
+
+      searchCountEl.textContent = matchCount > 0 ? `${matchCount}` : '0';
+      searchCountEl.style.color = matchCount > 0 ? '#22c55e' : '#9ca3af';
+    }
+
+    nodeSearchInput.addEventListener('input', () => {
+      applySearchHighlights(nodeSearchInput.value.trim());
+    });
+
+    nodeSearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        nodeSearchInput.value = '';
+        clearSearchHighlights();
+        nodeSearchInput.blur();
+        event.stopPropagation();
+      }
+    });
+
+    // Prevent pan/drag when interacting with the search input
+    nodeSearchInput.addEventListener('mousedown', (event) => event.stopPropagation());
 
     // Mouse wheel zoom functionality
     stage.addEventListener('wheel', (event) => {
