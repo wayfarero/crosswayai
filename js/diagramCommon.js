@@ -6,14 +6,47 @@ const path = require('path');
  * If the first folder is a parent of other folders, uses path.dirname of a subfolder.
  * Otherwise, uses path.dirname of the first folder.
  */
-function resolveWorkspaceRoot(workspaceFolders) {
+function resolveWorkspaceRoot(workspaceFolders, fsModule, CrossWayAILog) {
     if (!workspaceFolders || workspaceFolders.length === 0) {
+        if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No workspace folders found.');
         return '';
     }
 
+    // Try to use fs from global if not provided
+    let fs = fsModule;
+    if (!fs && typeof require !== 'undefined') {
+        try { fs = require('fs'); } catch (e) { fs = null; }
+    }
+
+    // Look for .code-workspace file recursively upward from each workspace folder
+    if (fs) {
+        for (const folder of workspaceFolders) {
+            let dir = folder.uri.fsPath;
+            let prevDir = null;
+            while (dir && dir !== prevDir) {
+                let files = [];
+                try {
+                    files = fs.readdirSync(dir);
+                } catch (e) {
+                    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Permission error reading dir ${dir}`);
+                }
+                const wsFile = files.find(f => f.endsWith('.code-workspace'));
+                if (wsFile) {
+                    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Found .code-workspace in ${dir}`);
+                    return dir;
+                }
+                prevDir = dir;
+                dir = path.dirname(dir);
+            }
+        }
+        if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No .code-workspace found recursively upward from workspace folders.');
+    }
+
+    // Fallback to previous logic
     const firstFolderPath = workspaceFolders[0].uri.fsPath;
 
     if (workspaceFolders.length === 1) {
+        if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Only one workspace folder, using: ${firstFolderPath}`);
         return firstFolderPath;
     }
 
@@ -24,10 +57,30 @@ function resolveWorkspaceRoot(workspaceFolders) {
     });
 
     if (isFirstFolderParent) {
+        if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: First folder is parent, using: ${path.dirname(otherFolders[0].uri.fsPath)}`);
         return path.dirname(otherFolders[0].uri.fsPath);
     }
 
+    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Using fallback: ${path.dirname(firstFolderPath)}`);
     return path.dirname(firstFolderPath);
+}
+
+/**
+ * Utility to recursively remove a directory if it exists.
+ * @param {string} dirPath - Directory path to remove.
+ * @param {object} fs - Node.js fs module (dependency injected).
+ * @param {object} [CrossWayAILog] - Optional logger.
+ * @returns {Promise<void>}
+ */
+async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
+    try {
+        if (fs.existsSync(dirPath)) {
+            await fs.promises.rm(dirPath, { recursive: true, force: true });
+            if (CrossWayAILog) CrossWayAILog.appendLine('Cleaned up directory: ' + dirPath);
+        }
+    } catch (e) {
+        if (CrossWayAILog) CrossWayAILog.appendLine('>Warning: Failed to clean up directory: ' + e.message);
+    }
 }
 
 /**
@@ -49,6 +102,12 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
         return;
     }
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
+    const crosswayaiTempDir = path.join(crosswayaiDir, 'temp');
+
+    if (!fs.existsSync(crosswayaiTempDir)) {
+        fs.mkdirSync(crosswayaiTempDir);
+    }
+
     const logFile = path.join(crosswayaiDir, 'crosswayai.log');
     const logStream = fs.createWriteStream(logFile, { flags: 'a' });
     const extensionAblPath = path.join(context.extensionPath, 'crosswayai.pl');
@@ -62,7 +121,9 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
         '-p',
         runScriptPath,
         '-baseADE',
-        effectivePropath
+        effectivePropath,
+        '-T',
+        crosswayaiTempDir
     ];
     if (extraArgs && Array.isArray(extraArgs)) {
         args.push(...extraArgs);
@@ -725,5 +786,6 @@ module.exports = {
     dedupeLinks,
     buildLinkEdgeMap,
     getCircularEdgeKeys,
-    renderSortedEdges
+    renderSortedEdges,
+    cleanupDirectory
 };

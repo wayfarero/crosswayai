@@ -1,4 +1,4 @@
-const { runABLScript, resolveWorkspaceRoot } = require('./diagramCommon');
+const { runABLScript, resolveWorkspaceRoot, cleanupDirectory } = require('./diagramCommon');
 
 function getProjectNameForFolder(folder, path) {
     return folder.name || path.basename(folder.uri.fsPath);
@@ -26,7 +26,7 @@ async function generateDependencyMap(context, deps) {
 
     vscode.window.showInformationMessage('CrossWayAI: Generating dependency map...');
 
-    const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders);
+    const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders, fs, CrossWayAILog);
     CrossWayAILog.appendLine(`Started generating dependency map for workspace: ${workspaceRoot} ...`);
     CrossWayAILog.show(true);
     
@@ -168,6 +168,9 @@ async function generateDependencyMap(context, deps) {
 async function runABLAnalysis(context, workspaceRoot, deps) {
     const extraArgs = ['-param', JSON.stringify({ workspaceRoot })];
     await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runAnalysis.p', args: extraArgs });
+    const { fs, path, CrossWayAILog } = deps;
+    const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
+    await cleanupDirectory(tempDir, fs, CrossWayAILog);
 }
 
 

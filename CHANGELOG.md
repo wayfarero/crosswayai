@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.3
+
+- Bugfix: Properly determine workspaceRoot for multi-project workspaces and ABL script now uses -T `.crosswayai/temp` for temp files
+- Bugfix: Corrected mapping of all types of include files dependencies in the `CrossWayAI: Generate Dependency Map` command
+
 ## 1.7.2
 
 - Added support for searching nodes in CrossWayAI Viewer

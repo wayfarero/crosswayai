@@ -1,4 +1,4 @@
-const { runABLScript } = require('./diagramCommon');
+const { runABLScript, cleanupDirectory } = require('./diagramCommon');
 
 async function dumpDfFile(context, deps, dbName, workspaceRoot, pfFilePath) {
     // Pass param and parameterFile as extra arguments
@@ -65,14 +65,7 @@ async function dumpAllDBDefinitions(context, deps) {
     
     // Clean up temp directory after all databases have been processed
     const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
-    try {
-        if (fs.existsSync(tempDir)) {
-            await fs.promises.rm(tempDir, { recursive: true, force: true });
-            CrossWayAILog.appendLine('Cleaned up temporary directory: ' + tempDir);
-        }
-    } catch (e) {
-        CrossWayAILog.appendLine('>Warning: Failed to clean up temporary directory: ' + e.message);
-    }
+    await cleanupDirectory(tempDir, fs, CrossWayAILog);
     
     CrossWayAILog.appendLine('Completed dumpAllDBDefinitions.');
     CrossWayAILog.show(true);
