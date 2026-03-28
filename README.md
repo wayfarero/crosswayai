@@ -73,6 +73,10 @@ and via context menus:
 
 ## Release Notes
 
+### 1.7.4
+
+- Bugfix: corrected some more edge cases on include file dependency mapping
+
 ### 1.7.3
 
 - Bugfix: Properly determine workspaceRoot for multi-project workspaces and ABL script now uses -T `.crosswayai/temp` for temp files
