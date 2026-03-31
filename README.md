@@ -73,6 +73,11 @@ and via context menus:
 
 ## Release Notes
 
+### 1.7.5
+
+- Bugfix: corrected some more edge cases on include file dependency mapping
+- Improvements on zoom functionality: center on mouse cursor, limit the zoom in to the reset level, corrected the reset button to show the original view when the .md file was opened
+
 ### 1.7.4
 
 - Bugfix: corrected some more edge cases on include file dependency mapping

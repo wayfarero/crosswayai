@@ -1703,6 +1703,34 @@
         }
 
         activateDiagramSizing();
+        // Set zoom to 1 (same as reset button)
+        applyZoom(1, false);
+        // Center the source node in the viewer if available
+        // Use the svg variable already declared above
+        if (svg && window.CROSSWAY_SOURCE_NODE) {
+          // Find the node element by id, data-id, or class
+          let nodeEl = null;
+          // Try data-id
+          nodeEl = svg.querySelector(`.node[data-id='${window.CROSSWAY_SOURCE_NODE}']`);
+          // Try class
+          if (!nodeEl) nodeEl = svg.querySelector(`.node.id-${window.CROSSWAY_SOURCE_NODE}`);
+          // Try id pattern
+          if (!nodeEl) nodeEl = svg.querySelector(`.node[id*='${window.CROSSWAY_SOURCE_NODE}']`);
+          if (nodeEl) {
+            // Get the bounding box of the node
+            const nodeRect = nodeEl.getBoundingClientRect();
+            const svgRect = svg.getBoundingClientRect();
+            // Calculate node center relative to SVG
+            const nodeCenterX = nodeRect.left + nodeRect.width / 2 - svgRect.left;
+            const nodeCenterY = nodeRect.top + nodeRect.height / 2 - svgRect.top;
+            // Calculate scroll to center node in stage
+            const zoom = currentZoom || 1;
+            const scrollX = nodeCenterX * zoom - stage.clientWidth / 2;
+            const scrollY = nodeCenterY * zoom - stage.clientHeight / 2;
+            stage.scrollLeft = Math.max(0, scrollX);
+            stage.scrollTop = Math.max(0, scrollY);
+          }
+        }
         if (nodeSearchInput.value.trim()) {
           applySearchHighlights(nodeSearchInput.value.trim());
         }
@@ -1901,10 +1929,60 @@
     }
 
     document.getElementById('exportPng').addEventListener('click', exportDiagramAsPng);
-    document.getElementById('zoomIn').addEventListener('click', () => applyZoom(currentZoom * 1.2, true));
-    document.getElementById('zoomOut').addEventListener('click', () => applyZoom(currentZoom / 1.2, true));
+    function zoomWithCenter(targetZoom) {
+      const svg = diagram.querySelector('svg');
+      if (!svg || !svgBaseWidth || !svgBaseHeight) {
+        applyZoom(targetZoom, true);
+        return;
+      }
+      // Get current center of the view in SVG coordinates
+      const centerX = stage.scrollLeft + stage.clientWidth / 2;
+      const centerY = stage.scrollTop + stage.clientHeight / 2;
+      const svgCenterX = centerX / currentZoom;
+      const svgCenterY = centerY / currentZoom;
+      // Clamp zoom
+      const newZoom = Math.min(1, Math.max(0.1, targetZoom));
+      applyZoom(newZoom, false);
+      // After zoom, keep the same SVG center
+      const newCenterX = svgCenterX * newZoom;
+      const newCenterY = svgCenterY * newZoom;
+      let targetScrollLeft = newCenterX - stage.clientWidth / 2;
+      let targetScrollTop = newCenterY - stage.clientHeight / 2;
+      const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+      const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+      stage.scrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft));
+      stage.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+    }
+
+    document.getElementById('zoomIn').addEventListener('click', () => {
+      zoomWithCenter(currentZoom * 1.2);
+    });
+    document.getElementById('zoomOut').addEventListener('click', () => {
+      zoomWithCenter(currentZoom / 1.2);
+    });
     document.getElementById('fit').addEventListener('click', fitDiagramToViewport);
-    document.getElementById('reset').addEventListener('click', () => applyZoom(1, true));
+    document.getElementById('reset').addEventListener('click', () => {
+      applyZoom(1, false);
+      // Center on referenced node if available
+      const svg = diagram.querySelector('svg');
+      if (svg && window.CROSSWAY_SOURCE_NODE) {
+        let nodeEl = null;
+        nodeEl = svg.querySelector(`.node[data-id='${window.CROSSWAY_SOURCE_NODE}']`);
+        if (!nodeEl) nodeEl = svg.querySelector(`.node.id-${window.CROSSWAY_SOURCE_NODE}`);
+        if (!nodeEl) nodeEl = svg.querySelector(`.node[id*='${window.CROSSWAY_SOURCE_NODE}']`);
+        if (nodeEl) {
+          const nodeRect = nodeEl.getBoundingClientRect();
+          const svgRect = svg.getBoundingClientRect();
+          const nodeCenterX = nodeRect.left + nodeRect.width / 2 - svgRect.left;
+          const nodeCenterY = nodeRect.top + nodeRect.height / 2 - svgRect.top;
+          const zoom = currentZoom || 1;
+          const scrollX = nodeCenterX * zoom - stage.clientWidth / 2;
+          const scrollY = nodeCenterY * zoom - stage.clientHeight / 2;
+          stage.scrollLeft = Math.max(0, scrollX);
+          stage.scrollTop = Math.max(0, scrollY);
+        }
+      }
+    });
 
     // Node search functionality
     const nodeSearchInput = document.getElementById('nodeSearch');
@@ -2006,12 +2084,44 @@
     // Prevent pan/drag when interacting with the search input
     nodeSearchInput.addEventListener('mousedown', (event) => event.stopPropagation());
 
-    // Mouse wheel zoom functionality
+    // Mouse wheel zoom functionality (center on cursor)
     stage.addEventListener('wheel', (event) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
-        applyZoom(currentZoom * zoomFactor, false);
+        const svg = diagram.querySelector('svg');
+        if (!svg || !svgBaseWidth || !svgBaseHeight) {
+          applyZoom(currentZoom * zoomFactor, false);
+          return;
+        }
+
+        // Mouse position relative to the SVG
+        const stageRect = stage.getBoundingClientRect();
+        const svgRect = svg.getBoundingClientRect();
+        // Mouse position relative to the stage scroll area
+        const mouseX = event.clientX - stageRect.left + stage.scrollLeft;
+        const mouseY = event.clientY - stageRect.top + stage.scrollTop;
+
+        // Position in SVG coordinates (before zoom)
+        const svgX = mouseX / currentZoom;
+        const svgY = mouseY / currentZoom;
+
+        // Apply zoom
+        const newZoom = Math.min(1, Math.max(0.1, currentZoom * zoomFactor));
+        applyZoom(newZoom, false);
+
+        // After zoom, adjust scroll so that (svgX, svgY) stays under the mouse
+        const newMouseX = svgX * newZoom;
+        const newMouseY = svgY * newZoom;
+        // Clamp scroll values to valid range
+        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        let targetScrollLeft = newMouseX - (event.clientX - stageRect.left);
+        let targetScrollTop = newMouseY - (event.clientY - stageRect.top);
+        targetScrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft));
+        targetScrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+        stage.scrollLeft = targetScrollLeft;
+        stage.scrollTop = targetScrollTop;
       }
     });
 
