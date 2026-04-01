@@ -73,6 +73,10 @@ and via context menus:
 
 ## Release Notes
 
+### 1.7.7
+
+- Bugfix: corrected build package
+
 ### 1.7.6
 
 - Bugfix: corrected edge cases on "run" file dependency mapping
