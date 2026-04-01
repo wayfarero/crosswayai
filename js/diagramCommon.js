@@ -1,5 +1,7 @@
 const path = require('path');
 
+const diagramColors = require('../resources/diagram-colors.json');
+
 /**
  * Resolves the workspace root directory from the available workspace folders.
  * If there is only one folder, uses its path directly.
@@ -497,21 +499,9 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     let edgeCounter = 0;
     const MAX_EDGE_LABEL_LENGTH = 120;
 
-    const NODE_BORDER_COLORS = {
-        class: "#0da33f",       // new / class
-        include: "#ed1e97",     // include
-        procedure: "#1d6be0",   // run / invoke
-        screen: "#e0781c"       // screen
-    };
+    const NODE_BORDER_COLORS = diagramColors.nodeBorderColors;
 
-    const LINK_COLORS = {
-        include: "#ed1e97",
-        run: "#1d6be0",
-        invoke: "#1d6be0",
-        inherits: "#18e2ce",
-        implements: "#1fcce2",
-        circular: "#ff0000"
-    };
+    const LINK_COLORS = diagramColors.linkColors;
 
     let mermaidGraph = `graph ${graphType};\n`;
 

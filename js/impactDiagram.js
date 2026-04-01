@@ -112,7 +112,19 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
             if (parts.length > 1) {
                 const methodOrProcedure = parts[1].split(',')[0].trim();
                 if (methodOrProcedure) {
-                    return methodOrProcedure.replace(/\s+/g, ' ');
+                    const relationType = lower.startsWith('invoke:') ? 'invoke' : 'run';
+                    return `${methodOrProcedure.replace(/\s+/g, ' ')} (${relationType})`;
+                }
+            }
+            return '';
+        }
+
+        if (lower.startsWith('public-property:')) {
+            const parts = normalized.split(':');
+            if (parts.length > 1) {
+                const propertyName = parts.slice(1).join(':').trim();
+                if (propertyName) {
+                    return `${propertyName.replace(/\s+/g, ' ')} (public-property)`;
                 }
             }
             return '';

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.6
+
+- Bugfix: corrected edge cases on "run" file dependency mapping
+- Improvement: link tooltip now supports "public-property" as well, "new" links are now shown using green colour, minor code refactoring regarding colour handling
+
 ## 1.7.5
 
 - Bugfix: corrected some more edge cases on include file dependency mapping

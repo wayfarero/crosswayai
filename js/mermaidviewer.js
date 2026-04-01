@@ -351,6 +351,20 @@ function createMermaidViewer(deps) {
                 requestPath = '/html/mermaid-viewer.html';
             }
 
+            if (requestPath === '/__crosswayai/diagram-colors.json') {
+                const colorsPath = path.join(mermaidServerExtensionRoot, 'resources', 'diagram-colors.json');
+                fs.readFile(colorsPath, (err, data) => {
+                    if (err) {
+                        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                        res.end('Not found');
+                        return;
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(data);
+                });
+                return;
+            }
+
             const normalized = path.normalize(requestPath.replace(/^\/+/, ''));
             const isViewerRequest = normalized === path.join('html', 'mermaid-viewer.html');
             const baseRoot = isViewerRequest ? mermaidServerExtensionRoot : mermaidServerRoot;

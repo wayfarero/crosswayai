@@ -300,16 +300,23 @@
     const params = new URLSearchParams(window.location.search);
     const defaultMarkdownPath = params.get('file') || '.crosswayai/mermaid/impact_runAnalysis.p.md';
 
-    const LINK_TYPE_COLORS = {
-      include: '#ed1e97',
-      run: '#1d6be0',
-      invoke: '#1d6be0',
-      inherits: '#18e2ce',
-      implements: '#1fcce2',
-      circular: '#ff0000',
+    let LINK_TYPE_COLORS = {
       selected: '#f97316',
       undefined: '#555555'
     };
+
+    async function loadDiagramColors() {
+      try {
+        const response = await fetch('/__crosswayai/diagram-colors.json', { cache: 'no-store' });
+        if (response.ok) {
+          const colors = await response.json();
+          LINK_TYPE_COLORS = Object.assign({}, colors.linkColors || {}, { selected: '#f97316', undefined: '#555555' });
+        }
+      } catch (_) {
+        // Fall back to defaults already set above
+      }
+    }
+
     let currentZoom = 1;
     let svgBaseWidth = 0;
     let svgBaseHeight = 0;
@@ -423,6 +430,8 @@
         '<div class="legend-body">',
         buildLegendRow('include', 'include'),
         buildLegendRow('run', 'run / invoke'),
+        buildLegendRow('new', 'new'),
+        buildLegendRow('public-property', 'public-property'),
         buildLegendRow('inherits', 'inherits'),
         buildLegendRow('implements', 'implements'),
         buildLegendRow('circular', 'circular'),
@@ -882,20 +891,8 @@
         'multiple'
       ]);
 
-      return toUniqueList(values).filter((item) => {
-        const lower = item.toLowerCase();
-        if (blocked.has(lower)) {
-          return false;
-        }
-
-        // Show tooltip only for explicit RUN procedure targets (path-like .p/.w).
-        const normalized = lower.replace(/\//g, '\\');
-        const isProcedureFile = normalized.endsWith('.p') || normalized.endsWith('.w');
-        const isPathLike = normalized.includes('\\');
-
-        return isProcedureFile && isPathLike;
-      });
-    }
+        return toUniqueList(values).filter((item) => !blocked.has(item.toLowerCase()));
+      }
 
       function getEdgeTooltipItems(edgeEl, edgeElementOrder, fallbackLabelsByEdge) {
         const edgeIds = getEdgeIdentity(edgeEl);
@@ -2170,7 +2167,7 @@
       stage.classList.remove('dragging');
     });
 
-    loadFromMarkdown(defaultMarkdownPath);
+    loadDiagramColors().then(() => loadFromMarkdown(defaultMarkdownPath));
   </script>
 </body>
 </html>
