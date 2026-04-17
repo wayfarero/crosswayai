@@ -168,6 +168,75 @@ function getDsMapArray(dsMap, tableName) {
     return (((dsMap || {}).dsMap || {})[tableName]) || [];
 }
 
+function buildNodeDatabaseDetails(dsMap) {
+    const databaseAccessRows = getDsMapArray(dsMap, 'ttDatabaseAccess');
+    const fileNodes = getDsMapArray(dsMap, 'ttFileNode');
+
+    if (databaseAccessRows.length === 0 || fileNodes.length === 0) {
+        return {};
+    }
+
+    const nodeById = new Map();
+    fileNodes.forEach(node => {
+        if (node && node.NodeId !== undefined && node.NodeId !== null) {
+            nodeById.set(node.NodeId, node);
+        }
+    });
+
+    const detailsByNodeId = new Map();
+
+    databaseAccessRows.forEach(row => {
+        if (!row || row.NodeId === undefined || row.NodeId === null) {
+            return;
+        }
+
+        const node = nodeById.get(row.NodeId);
+        if (!node) {
+            return;
+        }
+
+        const databaseName = String(row.DatabaseName || '').trim();
+        const tableName = String(row.TableName || '').trim();
+        if (!databaseName || !tableName) {
+            return;
+        }
+
+        const mermaidNodeId = toMermaidNodeId(node.NodeId || node.FilePath || node.FileName);
+        if (!detailsByNodeId.has(mermaidNodeId)) {
+            detailsByNodeId.set(mermaidNodeId, new Map());
+        }
+
+        const dbMap = detailsByNodeId.get(mermaidNodeId);
+        if (!dbMap.has(databaseName)) {
+            dbMap.set(databaseName, new Set());
+        }
+
+        dbMap.get(databaseName).add(tableName);
+    });
+
+    const serialized = {};
+    Array.from(detailsByNodeId.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([nodeId, dbMap]) => {
+            const groupedValues = {};
+
+            Array.from(dbMap.entries())
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .forEach(([databaseName, tableNames]) => {
+                    const values = Array.from(tableNames).sort((a, b) => a.localeCompare(b));
+                    if (values.length > 0) {
+                        groupedValues[databaseName] = values;
+                    }
+                });
+
+            if (Object.keys(groupedValues).length > 0) {
+                serialized[nodeId] = groupedValues;
+            }
+        });
+
+    return serialized;
+}
+
 function getFirstLinkTypeEntry(linkType, { toLowerCase = true } = {}) {
     if (typeof linkType !== 'string') {
         return '';
@@ -481,7 +550,11 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
             return;
         }
 
-        const graphWithMetadata = prependSourceMetadata(mermaidGraph, targetNode);
+        const nodeDetails = buildNodeDatabaseDetails(dsMap);
+        const graphWithNodeDetails = Object.keys(nodeDetails).length > 0
+            ? `%%CROSSWAY_NODE_DETAILS:${JSON.stringify(nodeDetails)}\n${mermaidGraph}`
+            : mermaidGraph;
+        const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, targetNode);
         const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, targetNode.FileName, graphWithMetadata);
         if (savedPath) {
             await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
@@ -770,6 +843,7 @@ module.exports = {
     runABLScript,
     toMermaidNodeId,
     getDsMapArray,
+    buildNodeDatabaseDetails,
     getFirstLinkTypeEntry,
     collectDirectionalLinks,
     collectBidirectionalLinks,

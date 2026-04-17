@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.8
+
+- Bugfix: corrected handling of "inherited-property" link, removed tooltip for "new" links
+- Improvement: 
+    - package diagram highligthing updated to reflect path between hovered node vs. main package node 
+    - added double-click event on file node to open the file in the editor
+    - added database access tooltip on file node hover event
+    - added support to automatically sync file reference mappings on saving updates over successfully compiled ABL files
+
 ## 1.7.7
 
 - Bugfix: corrected build package

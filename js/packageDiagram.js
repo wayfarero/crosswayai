@@ -94,7 +94,9 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     let mermaidGraph = 'graph TD;\n';
     const declaredNodes = new Set();
     const fileMap = {};
+    const parentMap = {};
     let edgeCounter = 0;
+    let selectedNodeId = null;
     const edgeStyleIndices = new Map();
 
     const branchPalette = [
@@ -249,6 +251,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
         );
 
         if (pkg.parentPath) {
+            parentMap[pkgId] = packageNodeId(pkg.parentPath);
             addStyledEdge(
                 packageNodeId(pkg.parentPath),
                 pkgId,
@@ -278,6 +281,9 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
             const isSelectedNode =
                 cls.className.toLowerCase() === targetClassName.toLowerCase() &&
                 String(cls.fileName || '').toLowerCase() === String((targetNode && targetNode.FileName) || '').toLowerCase();
+            if (isSelectedNode) {
+                selectedNodeId = classId;
+            }
             const selectedFillColor = isSelectedNode ? '#1f6feb' : mixColors(fillColor, '#ffffff', 0.18);
             const selectedTextColor = isSelectedNode ? '#ffffff' : textColor;
             const dashedSelection = isSelectedNode ? ',stroke-dasharray:5 4,stroke-width:3px' : '';
@@ -292,14 +298,29 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
                 classId,
                 `stroke:${mixColors(fillColor, '#6b7280', 0.2)},stroke-width:2px`
             );
+            parentMap[classId] = packageNodeId(cls.packagePath);
         });
 
     appendBatchedLinkStyles();
 
+    const metadataLines = [];
+    if (selectedNodeId) {
+        metadataLines.push(`%%CROSSWAY_SOURCE_NODE:${selectedNodeId}`);
+    }
+    const serializedParentMap = JSON.stringify(parentMap);
+    if (serializedParentMap && serializedParentMap !== '{}') {
+        metadataLines.push(`%%CROSSWAY_PARENT_MAP:${serializedParentMap}`);
+    }
+
     const serializedFileMap = JSON.stringify(fileMap);
     if (serializedFileMap && serializedFileMap !== '{}') {
-        return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n${mermaidGraph}`;
+        metadataLines.push(`%%CROSSWAY_FILE_MAP:${serializedFileMap}`);
     }
+
+    if (metadataLines.length > 0) {
+        return `${metadataLines.join('\n')}\n${mermaidGraph}`;
+    }
+
     return mermaidGraph;
 }
 

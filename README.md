@@ -21,11 +21,20 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 ## Requirements
 
 - Progress OpenEdge installation.
-- [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension
+- [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension (installed automatically with CrossWayAI)
 - Windows support only (for now)
 
 ## Recomandations
 - Workspace configuration file (.code-workspace) present 
+
+## Before You Start
+
+> **Important:** CrossWayAI requires your ABL sources to be compiled. It reads `.xref`
+> files produced by the OpenEdge ABL extension's background builder — without them, no
+> dependency data will be available.
+>
+> **Complete the [OpenEdge ABL extension setup](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp)
+> first** and make sure your project compiles successfully before running CrossWayAI.
 
 ## Getting Started
 
@@ -72,6 +81,15 @@ and via context menus:
 ![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
 
 ## Release Notes
+
+### 1.7.8
+
+- Bugfix: corrected handling of "inherited-property" link, removed tooltip for "new" links
+- Improvement: 
+    - package diagram highligthing updated to reflect path between hovered node vs. main package node 
+    - added double-click event on file node to open the file in the editor
+    - added database access tooltip on file node hover event
+    - added support to automatically sync file reference mappings on saving updates over successfully compiled ABL files
 
 ### 1.7.7
 

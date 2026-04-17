@@ -1,4 +1,5 @@
 const { runABLScript, resolveWorkspaceRoot, cleanupDirectory } = require('./diagramCommon');
+const { setAnalysisRunning } = require('./xrefWatcher');
 
 function getProjectNameForFolder(folder, path) {
     return folder.name || path.basename(folder.uri.fsPath);
@@ -142,10 +143,13 @@ async function generateDependencyMap(context, deps) {
     CrossWayAILog.appendLine(`>Running ABL analysis...`);
     CrossWayAILog.show(true);
     try {
+        setAnalysisRunning(true);
         await runABLAnalysis(context, workspaceRoot, { vscode, fs, path, CrossWayAILog });
     } catch (error) {
         CrossWayAILog.appendLine(`**Error during ABL analysis: ${error.message}`);
         CrossWayAILog.show(true);
+    } finally {
+        setAnalysisRunning(false);
     }
 
     CrossWayAILog.appendLine("Done generating dependency map.");

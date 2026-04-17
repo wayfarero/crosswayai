@@ -39,6 +39,8 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
             lt.startsWith('invoke') ||
             lt.startsWith('run') ||
             lt.startsWith('public-property:') ||
+            lt.startsWith('inherited-property:') ||
+            lt === 'inherited-property' ||
             lt === 'include' ||
             lt === 'inherits:' ||
             lt === 'implements:' ||

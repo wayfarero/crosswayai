@@ -478,7 +478,11 @@ function createMermaidViewer(deps) {
                         const filePath = message.filePath;
                         const fileUri = vscode.Uri.file(filePath);
                         vscode.workspace.openTextDocument(fileUri).then(
-                            (doc) => vscode.window.showTextDocument(doc, vscode.ViewColumn.One),
+                            (doc) => vscode.window.showTextDocument(doc, {
+                        viewColumn: vscode.ViewColumn.One,
+                        preview: false,
+                        preserveFocus: false
+                    }),
                             (err) => {
                                 CrossWayAILog.appendLine(`Failed to open file: ${filePath} - ${err.message}`);
                                 vscode.window.showErrorMessage(`CrossWayAI: Could not open file: ${path.basename(filePath)}`);

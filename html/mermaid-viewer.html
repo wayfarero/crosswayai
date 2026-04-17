@@ -54,6 +54,12 @@
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.4);
     }
+    #diagram svg g.node,
+    #diagram svg .node,
+    #diagram svg .node * {
+      cursor: pointer;
+      user-select: none;
+    }
     button {
       border: 1px solid #4b5563;
       background: var(--panel2);
@@ -188,6 +194,20 @@
     }
     #edgeTooltip li {
       margin: 2px 0;
+    }
+    #edgeTooltip .tooltip-title {
+      margin-bottom: 8px;
+      color: #f9fafb;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    #edgeTooltip .db-group + .db-group {
+      margin-top: 8px;
+    }
+    #edgeTooltip .db-name {
+      margin-bottom: 4px;
+      color: #ffffff;
+      font-weight: 700;
     }
     #nodeContextMenu {
       position: fixed;
@@ -334,12 +354,13 @@
       if (!force && window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
         return;
       }
+      edgeTooltip.classList.remove('node-tooltip');
       edgeTooltip.hidden = true;
       edgeTooltip.innerHTML = '';
     }
 
     function positionEdgeTooltip(clientX, clientY) {
-      if (edgeTooltip.hidden) {
+      if (edgeTooltip.hidden || edgeTooltip.classList.contains('node-tooltip')) {
         return;
       }
 
@@ -353,6 +374,28 @@
       }
       if (top + rect.height > window.innerHeight - 8) {
         top = Math.max(8, clientY - rect.height - offset);
+      }
+
+      edgeTooltip.style.left = `${left}px`;
+      edgeTooltip.style.top = `${top}px`;
+    }
+
+    function positionNodeTooltip(anchorElement) {
+      if (edgeTooltip.hidden || !anchorElement || !anchorElement.getBoundingClientRect) {
+        return;
+      }
+
+      const offset = 12;
+      const anchorRect = anchorElement.getBoundingClientRect();
+      const tooltipRect = edgeTooltip.getBoundingClientRect();
+      let left = anchorRect.right + offset - 5;
+      let top = anchorRect.bottom + offset - 10;
+
+      if (left + tooltipRect.width > window.innerWidth - 8) {
+        left = Math.max(8, anchorRect.right - tooltipRect.width);
+      }
+      if (top + tooltipRect.height > window.innerHeight - 8) {
+        top = Math.max(8, anchorRect.bottom - tooltipRect.height - 10);
       }
 
       edgeTooltip.style.left = `${left}px`;
@@ -377,8 +420,48 @@
       }
 
       edgeTooltip.innerHTML = `<ul>${renderedItems}</ul>`;
+      edgeTooltip.classList.remove('node-tooltip');
       edgeTooltip.hidden = false;
       positionEdgeTooltip(event.clientX, event.clientY);
+    }
+
+    function showNodeTooltip(itemsByDatabase, event) {
+      if (!itemsByDatabase || typeof itemsByDatabase !== 'object') {
+        hideEdgeTooltip();
+        return;
+      }
+
+      const renderedGroups = Object.entries(itemsByDatabase)
+        .map(([databaseName, items]) => {
+          const renderedItems = (Array.isArray(items) ? items : [])
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .join('');
+
+          if (!renderedItems) {
+            return '';
+          }
+
+          return `
+            <div class="db-group">
+              <div class="db-name">${escapeHtml(databaseName)}</div>
+              <ul>${renderedItems}</ul>
+            </div>
+          `;
+        })
+        .filter(Boolean)
+        .join('');
+
+      if (!renderedGroups) {
+        hideEdgeTooltip();
+        return;
+      }
+
+      edgeTooltip.innerHTML = `<div class="tooltip-title">DB access</div>${renderedGroups}`;
+      edgeTooltip.classList.add('node-tooltip');
+      edgeTooltip.hidden = false;
+      positionNodeTooltip(event.currentTarget);
     }
 
     function setStatus(text, isError = false) {
@@ -392,8 +475,8 @@
         return true;
       }
 
-      // Package diagrams are generated externally and do not include CrossWay metadata.
-      // If a future package flow adds metadata, path naming above still keeps this excluded.
+      // Package diagrams are identified by persisted markdown naming so they can still
+      // carry CrossWay metadata without being treated like dependency diagrams.
       return false;
     }
 
@@ -502,9 +585,21 @@
 
       const HIGHLIGHT_COLOR = '#f97316';
       const CLICK_TOLERANCE = 24;
+      const NODE_DOUBLE_CLICK_DELAY_MS = 220;
       let activeSelection = null;
       let lockedNode = null;
+      let pendingNodeClickTimer = null;
       window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+
+      function openNodeFile(nodeId) {
+        const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
+        if (!filePath) {
+          return false;
+        }
+
+        window.parent.postMessage({ type: 'openFile', filePath: filePath }, '*');
+        return true;
+      }
 
       function isDiagramEdgeElement(edgeEl) {
         if (!edgeEl) {
@@ -855,10 +950,88 @@
 
       }
 
+      function getTreePathBetweenNodes(startNodeId, targetNodeId) {
+        if (!startNodeId || !targetNodeId) {
+          return null;
+        }
+
+        const startPath = getPathToRoot(startNodeId);
+        const targetPath = getPathToRoot(targetNodeId);
+        if (startPath.length === 0 || targetPath.length === 0) {
+          return null;
+        }
+
+        const targetPositions = new Map();
+        targetPath.forEach((nodeId, index) => {
+          targetPositions.set(nodeId, index);
+        });
+
+        let sharedAncestor = null;
+        let startAncestorIndex = -1;
+        let targetAncestorIndex = -1;
+
+        for (let i = 0; i < startPath.length; i++) {
+          const nodeId = startPath[i];
+          if (targetPositions.has(nodeId)) {
+            sharedAncestor = nodeId;
+            startAncestorIndex = i;
+            targetAncestorIndex = targetPositions.get(nodeId);
+            break;
+          }
+        }
+
+        if (!sharedAncestor) {
+          return null;
+        }
+
+        const combinedPath = startPath.slice(0, startAncestorIndex + 1);
+        const downPath = targetPath.slice(0, targetAncestorIndex).reverse();
+        return combinedPath.concat(downPath);
+      }
+
       function getHighlightSubgraph(nodeId, svgElement) {
+        if (window.CROSSWAY_IS_PACKAGE_DIAGRAM) {
+          const path = getPathToRoot(nodeId);
+          const nodes = new Set(path);
+          const edges = new Set();
+          for (let i = 0; i < path.length - 1; i++) {
+            edges.add(`${path[i]}->${path[i + 1]}`);
+            edges.add(`${path[i + 1]}->${path[i]}`);
+          }
+          return { nodes, edges };
+        }
+
         const sourceNodeId = window.CROSSWAY_SOURCE_NODE || null;
         if (sourceNodeId) {
-          return collectDirectedSubgraphToSource(nodeId, sourceNodeId, svgElement);
+          const directedHighlight = collectDirectedSubgraphToSource(nodeId, sourceNodeId, svgElement);
+          const isTrivialDirectedHighlight =
+            directedHighlight &&
+            directedHighlight.nodes instanceof Set &&
+            directedHighlight.nodes.size === 1 &&
+            directedHighlight.nodes.has(nodeId) &&
+            directedHighlight.edges instanceof Set &&
+            directedHighlight.edges.size === 0;
+
+          if (!isTrivialDirectedHighlight) {
+            return directedHighlight;
+          }
+
+          const treePath = getTreePathBetweenNodes(nodeId, sourceNodeId);
+          if (Array.isArray(treePath) && treePath.length > 0) {
+            const nodes = new Set(treePath);
+            const edges = new Set();
+
+            for (let i = 0; i < treePath.length - 1; i++) {
+              const from = treePath[i];
+              const to = treePath[i + 1];
+              edges.add(`${from}->${to}`);
+              edges.add(`${to}->${from}`);
+            }
+
+            return { nodes, edges };
+          }
+
+          return directedHighlight;
         }
 
         const path = getPathToRoot(nodeId);
@@ -886,6 +1059,7 @@
         'include',
         'inherits',
         'implements',
+        'new',
         'circular',
         'undefined',
         'multiple'
@@ -1003,11 +1177,27 @@
         });
       });
 
+      function resetNodeInteractionUi(event, { preventDefault = false } = {}) {
+        if (event) {
+          if (preventDefault) {
+            event.preventDefault();
+          }
+          event.stopPropagation();
+        }
+        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        hideEdgeTooltip(true);
+        hideNodeContextMenu();
+        if (pendingNodeClickTimer) {
+          clearTimeout(pendingNodeClickTimer);
+          pendingNodeClickTimer = null;
+        }
+      }
+
       const allNodes = svg.querySelectorAll('.node'); 
 
       allNodes.forEach(node => {
 
-        node.addEventListener('mouseenter', () => {
+        node.addEventListener('mouseenter', (event) => {
 
           if (lockedNode) return;
 
@@ -1017,37 +1207,58 @@
           const highlight = getHighlightSubgraph(nodeId, svg);
           fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
 
+          const nodeDetails = window.CROSSWAY_NODE_DETAILS?.[nodeId];
+          if (nodeDetails && Object.keys(nodeDetails).length > 0) {
+            showNodeTooltip(nodeDetails, event);
+          } else {
+            hideEdgeTooltip();
+          }
+
+        });
+
+        node.addEventListener('mousemove', (event) => {
+          if (edgeTooltip.hidden || window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+            return;
+          }
+          positionEdgeTooltip(event.clientX, event.clientY);
         });
 
         node.addEventListener('mouseleave', () => {
           if (lockedNode) return;
           resetGraphFade(svg);
+          hideEdgeTooltip();
         });
 
         node.addEventListener('click', (event) => {
-
-          event.stopPropagation();
-          window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
-          hideEdgeTooltip(true);
+          resetNodeInteractionUi(event);
 
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
 
-          if (lockedNode === nodeId) {
+          pendingNodeClickTimer = window.setTimeout(() => {
+            pendingNodeClickTimer = null;
+            if (lockedNode === nodeId) {
+              lockedNode = null;
+              resetGraphFade(svg);
+              return;
+            }
 
-            lockedNode = null;
-            resetGraphFade(svg);
-            return;
-
-          }
-
-          lockedNode = nodeId;
-
-          const highlight = getHighlightSubgraph(nodeId, svg);
-          fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
-
+            lockedNode = nodeId;
+            const highlight = getHighlightSubgraph(nodeId, svg);
+            fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+          }, NODE_DOUBLE_CLICK_DELAY_MS);
         });
-        
+
+        node.addEventListener('dblclick', (event) => {
+          resetNodeInteractionUi(event, { preventDefault: true });
+
+          const nodeId = getNodeIdentity(node);
+          if (!nodeId) return;
+
+          if (openNodeFile(nodeId)) {
+            setStatus('Opened file from node.');
+          }
+        });
 
       });
       
@@ -1071,7 +1282,7 @@
         if (filePath) {
           openFileItem.addEventListener('click', () => {
             hideNodeContextMenu();
-            window.parent.postMessage({ type: 'openFile', filePath: filePath }, '*');
+            openNodeFile(nodeId);
           });
         } else {
           openFileItem.style.opacity = '0.4';
@@ -1633,9 +1844,11 @@
 
     async function renderDiagram(code, markdownPath = defaultMarkdownPath) {
       const mermaidCode = organizeErDiagram(normalizeErKeySyntax(code)).trim();
+      window.CROSSWAY_IS_PACKAGE_DIAGRAM = isPackageDiagram(code, markdownPath);
       window.CROSSWAY_PARENT_MAP = {};
       window.CROSSWAY_SOURCE_NODE = null;
       window.CROSSWAY_EDGE_DETAILS = {};
+      window.CROSSWAY_NODE_DETAILS = {};
       window.CROSSWAY_FILE_MAP = {};
       const sourceNodeMatch = (code || '').match(/^\s*%%CROSSWAY_SOURCE_NODE:(.*)$/m);
       if (sourceNodeMatch) {
@@ -1655,6 +1868,14 @@
           window.CROSSWAY_EDGE_DETAILS = JSON.parse(edgeDetailsMatch[1]);
         } catch {
           window.CROSSWAY_EDGE_DETAILS = {};
+        }
+      }
+      const nodeDetailsMatch = (code || '').match(/^\s*%%CROSSWAY_NODE_DETAILS:(.*)$/m);
+      if (nodeDetailsMatch) {
+        try {
+          window.CROSSWAY_NODE_DETAILS = JSON.parse(nodeDetailsMatch[1]);
+        } catch {
+          window.CROSSWAY_NODE_DETAILS = {};
         }
       }
       const fileMapMatch = (code || '').match(/^\s*%%CROSSWAY_FILE_MAP:(.*)$/m);

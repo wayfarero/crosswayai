@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { generateDependencyMap } = require('./dependencyMap');
+const { setupXrefWatcher } = require('./xrefWatcher');
 const { generateIncludeDiagram } = require('./includeDiagram');
 const { generateImpactDiagram } = require('./impactDiagram');
 const { generateInterfaceDiagram } = require('./interfaceDiagram');
@@ -73,6 +74,8 @@ function activate(context) {
         { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram },
         { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram }
     ];
+
+    setupXrefWatcher(context, getCommonDeps());
 
     commands.forEach(command => {
         let disposableCommand;
