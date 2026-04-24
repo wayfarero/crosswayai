@@ -250,6 +250,65 @@ function getFirstLinkTypeEntry(linkType, { toLowerCase = true } = {}) {
     return toLowerCase ? firstEntry.toLowerCase() : firstEntry;
 }
 
+function parseInvokeRunSignature(rawLinkType) {
+    if (typeof rawLinkType !== 'string') {
+        return null;
+    }
+
+    const normalized = rawLinkType.trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const lower = normalized.toLowerCase();
+    let relationType = null;
+    if (lower.startsWith('invoke:')) {
+        relationType = 'invoke';
+    } else if (lower.startsWith('run:')) {
+        relationType = 'run';
+    }
+    if (!relationType) {
+        return null;
+    }
+
+    const parts = normalized.split(':');
+    if (parts.length < 2) {
+        return null;
+    }
+
+    const callPart = parts[1].trim();
+    if (!callPart) {
+        return null;
+    }
+
+    const tokens = callPart.split(',');
+    const methodName = (tokens[0] || '').trim();
+    const params = tokens.slice(1).join(',').trim();
+    if (!methodName) {
+        return null;
+    }
+
+    return {
+        relationType,
+        methodName,
+        params
+    };
+}
+
+function getInvokeRunDisplayLabel(rawLinkType, { includeRelationSuffix = false } = {}) {
+    const signature = parseInvokeRunSignature(rawLinkType);
+    if (!signature) {
+        return '';
+    }
+
+    const methodLabel = signature.methodName.replace(/\s+/g, ' ');
+    if (!includeRelationSuffix) {
+        return methodLabel;
+    }
+
+    return `${methodLabel} (${signature.relationType})`;
+}
+
 function collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
     direction = 'down',
     visited = new Set(),
@@ -411,9 +470,249 @@ function renderSortedEdges(edges, addEdge, {
                 edgeTypes.push('circular');
             }
 
-            const label = labelBuilder ? labelBuilder(edge) : '';
+            const label = labelBuilder ? labelBuilder(edge) : Array.from(edge.labels || []).join(', ');
             addEdge(edge.sourceNode, edge.destNode, label, edgeTypes);
         });
+}
+
+function toEdgeMetadataKey(sourceNode, destNode) {
+    const sourceNodeId = toMermaidNodeId(sourceNode.NodeId || sourceNode.FilePath || sourceNode.FileName);
+    const destNodeId = toMermaidNodeId(destNode.NodeId || destNode.FilePath || destNode.FileName);
+    return `${sourceNodeId}->${destNodeId}`;
+}
+
+function buildEdgeDetailsMap(edges) {
+    const edgeDetails = {};
+
+    Array.from(edges.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([, edge]) => {
+            const metadataKey = toEdgeMetadataKey(edge.sourceNode, edge.destNode);
+            const details = Array.from(edge.detailLabels || [])
+                .map(item => String(item || '').replace(/\r?\n/g, ' ').trim())
+                .filter(Boolean)
+                .sort((a, b) => a.localeCompare(b));
+
+            if (details.length > 0) {
+                edgeDetails[metadataKey] = details;
+            }
+        });
+
+    return edgeDetails;
+}
+
+function buildEdgeIndexKeys(edges) {
+    return Array.from(edges.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([, edge]) => toEdgeMetadataKey(edge.sourceNode, edge.destNode));
+}
+
+function buildEdgeMethodSignatures(links, allFileNodes) {
+    const edgeMethodSigs = {};
+    const nodeById = new Map();
+
+    allFileNodes.forEach(node => {
+        if (node && node.NodeId !== undefined && node.NodeId !== null) {
+            nodeById.set(node.NodeId, node);
+        }
+    });
+
+    Array.from(links || []).forEach((link) => {
+        const signature = parseInvokeRunSignature(link && link.LinkType);
+        if (!signature) {
+            return;
+        }
+
+        const sourceNode = nodeById.get(link.ParentNodeId);
+        const destNode = nodeById.get(link.NodeId);
+        if (!sourceNode || !destNode) {
+            return;
+        }
+
+        const metadataKey = toEdgeMetadataKey(sourceNode, destNode);
+
+        if (!edgeMethodSigs[metadataKey]) {
+            edgeMethodSigs[metadataKey] = [];
+        }
+
+        const exists = edgeMethodSigs[metadataKey].some(
+            entry => entry && entry.name === signature.methodName && entry.params === signature.params
+        );
+        if (!exists) {
+            edgeMethodSigs[metadataKey].push({ name: signature.methodName, params: signature.params });
+        }
+    });
+
+    return edgeMethodSigs;
+}
+
+function buildGlobalMethodSignatures(links) {
+    const globalMethodSigs = {};
+
+    Array.from(links || []).forEach((link) => {
+        const signature = parseInvokeRunSignature(link && link.LinkType);
+        if (!signature) {
+            return;
+        }
+
+        if (!globalMethodSigs[signature.methodName]) {
+            globalMethodSigs[signature.methodName] = [];
+        }
+
+        if (!globalMethodSigs[signature.methodName].includes(signature.params)) {
+            globalMethodSigs[signature.methodName].push(signature.params);
+        }
+    });
+
+    return globalMethodSigs;
+}
+
+function prependEdgeDetailsMetadata(graph, edges, {
+    includeEdgeIndexKeys = false,
+    includeEdgeMethodSigs = false,
+    includeGlobalMethodSigs = false,
+    linkFilter = null,
+    links = [],
+    allFileNodes = []
+} = {}) {
+    const graphText = typeof graph === 'string' ? graph : String(graph || '');
+    const metadataLines = [];
+
+    const edgeDetails = buildEdgeDetailsMap(edges);
+    const serializedEdgeDetails = JSON.stringify(edgeDetails);
+    if (serializedEdgeDetails && serializedEdgeDetails !== '{}') {
+        metadataLines.push(`%%CROSSWAY_EDGE_DETAILS:${serializedEdgeDetails}`);
+    }
+
+    if (includeEdgeIndexKeys) {
+        const edgeIndexKeys = buildEdgeIndexKeys(edges);
+        const serializedEdgeIndexKeys = JSON.stringify(edgeIndexKeys);
+        if (serializedEdgeIndexKeys && serializedEdgeIndexKeys !== '[]') {
+            metadataLines.push(`%%CROSSWAY_EDGE_INDEX_KEYS:${serializedEdgeIndexKeys}`);
+        }
+    }
+
+    if (includeEdgeMethodSigs) {
+        const filteredLinks = linkFilter
+            ? Array.from(links || []).filter(link => linkFilter(link))
+            : Array.from(links || []);
+
+        const edgeMethodSigs = buildEdgeMethodSignatures(filteredLinks, allFileNodes);
+        const serializedMethodSigs = JSON.stringify(edgeMethodSigs);
+        if (serializedMethodSigs && serializedMethodSigs !== '{}') {
+            metadataLines.push(`%%CROSSWAY_EDGE_METHOD_SIGS:${serializedMethodSigs}`);
+        }
+
+        if (includeGlobalMethodSigs) {
+            const globalMethodSigs = buildGlobalMethodSignatures(filteredLinks);
+            const serializedGlobalMethodSigs = JSON.stringify(globalMethodSigs);
+            if (serializedGlobalMethodSigs && serializedGlobalMethodSigs !== '{}') {
+                metadataLines.push(`%%CROSSWAY_GLOBAL_METHOD_SIGS:${serializedGlobalMethodSigs}`);
+            }
+        }
+    }
+
+    if (metadataLines.length > 0) {
+        return `${metadataLines.join('\n')}\n${graphText}`;
+    }
+
+    return graphText;
+}
+
+function parseNamedRelationLabel(rawLinkType, supportedRelationTypes = []) {
+    if (typeof rawLinkType !== 'string') {
+        return '';
+    }
+
+    const normalized = rawLinkType.trim();
+    if (!normalized) {
+        return '';
+    }
+
+    const lower = normalized.toLowerCase();
+    const relationType = supportedRelationTypes
+        .map(type => String(type || '').trim().toLowerCase())
+        .filter(Boolean)
+        .find(type => lower === type || lower.startsWith(`${type}:`)) || '';
+    if (!relationType) {
+        return '';
+    }
+
+    const parts = normalized.split(':');
+    if (parts.length <= 1) {
+        return '';
+    }
+
+    const relationName = parts.slice(1).join(':').trim();
+    if (!relationName) {
+        return '';
+    }
+
+    return `${relationName.replace(/\s+/g, ' ')} (${relationType})`;
+}
+
+function normalizeRelationshipTypes(relationshipTypes = []) {
+    return Array.from(new Set(
+        relationshipTypes
+            .map(type => String(type || '').trim().toLowerCase())
+            .filter(Boolean)
+    ));
+}
+
+function matchesRelationshipType(link, relationshipTypes) {
+    if (!link || typeof link.LinkType !== 'string') {
+        return false;
+    }
+
+    const normalizedLinkType = link.LinkType.trim().toLowerCase();
+    return relationshipTypes.some(type =>
+        normalizedLinkType === type || normalizedLinkType.startsWith(`${type}:`)
+    );
+}
+
+function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options = {}) {
+    const { vscode, getDsMapArray } = deps;
+    const {
+        graphType = 'LR',
+        diagramTypeName = '',
+        relationshipTypes = [],
+        includeDetailLabels = false,
+        detailLabelExtractor = null
+    } = options;
+
+    const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
+    const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
+    const startNodeId = targetNode.NodeId;
+
+    if (allFileLinks.length === 0 || allFileNodes.length === 0) {
+        vscode.window.showWarningMessage(`CrossWayAI: dsMap.json does not contain ${diagramTypeName} diagram data. Please regenerate the map.`);
+        return null;
+    }
+
+    const normalizedRelationshipTypes = normalizeRelationshipTypes(relationshipTypes);
+
+    const linksToRender = collectBidirectionalLinks(
+        allFileLinks,
+        startNodeId,
+        link => matchesRelationshipType(link, normalizedRelationshipTypes)
+    );
+
+    if (linksToRender.size === 0) {
+        vscode.window.showInformationMessage(`No ${diagramTypeName} references found for ${targetNode.FileName}.`);
+        return null;
+    }
+
+    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
+    const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
+    const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
+        includeDetailLabels,
+        detailLabelExtractor
+    });
+
+    renderSortedEdges(edges, addEdge);
+
+    const graph = getGraph();
+    return includeDetailLabels ? prependEdgeDetailsMetadata(graph, edges) : graph;
 }
 
 function prependSourceMetadata(graph, targetNode) {
@@ -429,7 +728,7 @@ function prependSourceMetadata(graph, targetNode) {
     return `${sourceLine}\n${graphText}`;
 }
 
-function resolveDiagramContext(context, uri, deps, missingRelationshipMessage) {
+function resolveDiagramContext(context, uri, deps) {
     const { vscode, fs, path, getDsMapArray } = deps;
     let filePath = '';
 
@@ -519,6 +818,11 @@ function getDiagramConfig(diagramType) {
             return {
                 persistDiagramType: 'instance_chain',
                 errorMessage: 'CrossWayAI: An error occurred during instance chain diagram generation.'
+            };
+        case 'property_access':
+            return {
+                persistDiagramType: 'property_access',
+                errorMessage: 'CrossWayAI: An error occurred during property access diagram generation.'
             };
         default:
             throw new Error(`Unsupported diagram type: ${diagramType}`);
@@ -743,8 +1047,19 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         }
 
         // run and invoke are intentionally rendered with the same color.
+        // property, public-property and inherited-property are also collapsed into the same color to reduce noise.
         const collapsedTypes = Array.from(new Set(
-            normalizedTypes.map((type) => (type === "invoke" ? "run" : type))
+            normalizedTypes.map((type) => {
+                if (type === "run" || type === "invoke") {
+                    return "call";
+                }
+
+                if (type === "property" || type === "public-property" || type === "inherited-property") {
+                    return "property";
+                }
+
+                return type;
+            })
         ));
 
         if (collapsedTypes.includes("circular")) {
@@ -845,11 +1160,17 @@ module.exports = {
     getDsMapArray,
     buildNodeDatabaseDetails,
     getFirstLinkTypeEntry,
+    parseInvokeRunSignature,
+    getInvokeRunDisplayLabel,
     collectDirectionalLinks,
     collectBidirectionalLinks,
     dedupeLinks,
     buildLinkEdgeMap,
     getCircularEdgeKeys,
     renderSortedEdges,
+    buildEdgeDetailsMap,
+    prependEdgeDetailsMetadata,
+    parseNamedRelationLabel,
+    generateMermaidRelationshipChainGraph,
     cleanupDirectory
 };

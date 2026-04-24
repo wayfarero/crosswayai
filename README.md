@@ -16,6 +16,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Call Diagram
     - Package Diagram
     - Instance Chain Diagram
+    - Property Access Diagram
     - Table Relations Diagram (AI)
 
 ## Requirements
@@ -69,6 +70,7 @@ and via context menus:
 -   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
 -   `Package Diagram`: Generate a package diagram for the selected file.
 -   `Instance Chain Diagram`: Generate an instantiation chain diagram for the selected file.
+-   `Property Access Diagram`: Generate a property access chain diagram for the selected file.
 
 ![Impact Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/impactdiagram.gif)
 
@@ -81,6 +83,17 @@ and via context menus:
 ![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
 
 ## Release Notes
+
+### 1.8.0
+  - Improvements: 
+    - Added support for new `Property Access Diagram` diagram type for visualizing the property access chain a file node is involved  
+    - Added support for depth level filtering in the CrossWayAI Viewer to be able to filter out nodes and links which span on higher levels of relationship
+    - Added support for CAST link types, shown with a yellow colour in `Impact Diagram` 
+    - Added hover and pin support for invoke links to show an extra detail tooltip containing the used method signatures 
+  - BugFix:
+    - corrected `CrossWayAI: Dump All DB Definitions` command in multi-project workspace, outputting separate .df files under separate project subfolders of .crosswayai/dump folder
+    - corrected sync of DB access mappings on changed file save event
+    - corrected `Package Diagram` to show the corresponding source directory on main root package
 
 ### 1.7.8
 

@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.7.8",
+    "version": "1.8.0",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",
@@ -51,7 +51,8 @@
             "onCommand:crosswayai.dumpAllDBDefinitions",
             "onCommand:crosswayai.generateTableRelationsDiagram",
             "onCommand:crosswayai.generatePackageDiagram",
-            "onCommand:crosswayai.generateInstanceChainDiagram"
+            "onCommand:crosswayai.generateInstanceChainDiagram",
+            "onCommand:crosswayai.generatePropertyAccessDiagram"
         ],
     "contributes": {
         "submenus": [
@@ -104,6 +105,10 @@
             {
                 "command": "crosswayai.generateInstanceChainDiagram",
                 "title": "Instance Chain Diagram"
+            },
+            {
+                "command": "crosswayai.generatePropertyAccessDiagram",
+                "title": "Property Access Diagram"
             }
         ],
         "menus": {
@@ -162,6 +167,11 @@
                 },
                 {
                     "command": "crosswayai.generateInstanceChainDiagram",
+                    "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/",
+                    "group": "navigation"
+                },
+                {
+                    "command": "crosswayai.generatePropertyAccessDiagram",
                     "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/",
                     "group": "navigation"
                 }

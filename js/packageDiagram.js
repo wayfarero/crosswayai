@@ -10,7 +10,7 @@ async function generatePackageDiagram(context, uri, deps) {
 function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     const { vscode, workspaceRoot, path } = deps;
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
-    const projectName = workspaceRoot && path ? path.basename(workspaceRoot) : 'Project';
+    const workspaceProjectName = workspaceRoot && path ? path.basename(workspaceRoot) : 'Project';
 
     if (allFileNodes.length === 0) {
         vscode.window.showWarningMessage('CrossWayAI: dsMap.json does not contain package diagram data. Please regenerate the map.');
@@ -18,33 +18,57 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     }
 
     const targetClassName = String((targetNode && targetNode.ClassName) || '').trim();
-    const targetRootPackage = targetClassName.split('.').map(item => item.trim()).filter(Boolean)[0] || '';
+    const targetRootPackage = targetClassName.includes('.')
+        ? targetClassName.split('.')[0].trim()
+        : '';
+
+    const targetRootPackageLower = targetRootPackage.toLowerCase();
+    const targetSource = String((targetNode && (targetNode.source || targetNode.Source)) || '').trim();
+    const targetProject = String((targetNode && (targetNode.project || targetNode.Project)) || '').trim();
 
     if (!targetRootPackage) {
-        vscode.window.showInformationMessage(`No ClassName found for ${targetNode.FileName}. Package diagram requires a class with package notation.`);
+        vscode.window.showInformationMessage(`No package for ${targetNode.FileName}. Package diagram requires a class with package notation.`);
         return null;
     }
 
-    const targetRootPackageLower = targetRootPackage.toLowerCase();
-    const classNodes = allFileNodes.filter(node => {
-        if (typeof node.ClassName !== 'string') {
-            return false;
-        }
-
-        const className = node.ClassName.trim();
+    function matchesTargetScope(node) {
+        const className = String(node.ClassName || '').trim();
         if (!className) {
             return false;
         }
 
         const classNameLower = className.toLowerCase();
         return classNameLower === targetRootPackageLower || classNameLower.startsWith(`${targetRootPackageLower}.`);
+    }
+
+    const packageClassNodes = allFileNodes.filter(matchesTargetScope);
+
+    let classNodes = packageClassNodes.filter(node => {
+        const nodeSource = String(node.source || node.Source || '').trim();
+        const nodeProject = String(node.project || node.Project || '').trim();
+
+        if (targetProject && nodeProject && nodeProject !== targetProject) {
+            return false;
+        }
+
+        if (targetSource && nodeSource && nodeSource !== targetSource) {
+            return false;
+        }
+
+        return true;
     });
+
+    if (classNodes.length === 0) {
+        classNodes = packageClassNodes;
+    }
+
     if (classNodes.length === 0) {
         vscode.window.showInformationMessage(`No classes found under package root '${targetRootPackage}'.`);
         return null;
     }
 
-    const defaultSource = String(classNodes[0].source || '').trim() || 'abl';
+    const diagramProjectName = targetProject || workspaceProjectName;
+    const defaultSource = targetSource || String(classNodes[0].source || classNodes[0].Source || '').trim() || 'abl';
 
     const packageOrder = [];
     const packageMap = new Map();
@@ -67,9 +91,8 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
 
         const classSimpleName = parts[parts.length - 1];
         const packageParts = parts.slice(0, -1);
-
-        let parentPath = targetRootPackage;
         let currentPath = targetRootPackage;
+        let parentPath = targetRootPackage;
 
         packageParts.slice(1).forEach(part => {
             currentPath = `${currentPath}.${part}`;
@@ -225,7 +248,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     }
 
     const rootId = packageNodeId(targetRootPackage);
-    const rootLabel = `${targetRootPackage}\n[${projectName}](${defaultSource})`;
+    const rootLabel = `${targetRootPackage}\n[${diagramProjectName}](${defaultSource})`;
     declareNode(rootId, rootLabel, `fill:#d1d5db,stroke-width:0px,color:#1f2937`);
 
     packageOrder.forEach(pkgPath => {

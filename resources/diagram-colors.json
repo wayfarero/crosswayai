@@ -1,10 +1,10 @@
 {
     "linkColors": {
         "include": "#ed1e97",
-        "run": "#1d6be0",
-        "invoke": "#1d6be0",
+        "call": "#1d6be0",
+        "cast": "#ffd400",
         "new": "#0da33f",
-        "public-property": "#7dd3a7",
+        "property": "#7dd3a7",
         "inherits": "#18e2ce",
         "implements": "#1fcce2",
         "circular": "#ff0000",

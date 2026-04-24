@@ -1,10 +1,14 @@
 const {
     generateDiagram,
     createMermaidGraphWriter,
-    toMermaidNodeId,
     buildLinkEdgeMap,
     getCircularEdgeKeys,
-    renderSortedEdges
+    renderSortedEdges,
+    getInvokeRunDisplayLabel,
+    getFirstLinkTypeEntry,
+    prependEdgeDetailsMetadata,
+    parseNamedRelationLabel,
+    collectBidirectionalLinks
 } = require('./diagramCommon');
 
 async function generateImpactDiagram(context, uri, deps) {
@@ -44,50 +48,12 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
             lt === 'include' ||
             lt === 'inherits:' ||
             lt === 'implements:' ||
-            lt === 'new'
+            lt === 'new' ||
+            lt === 'cast'
         );
     }
 
-    function findImpactedLinks(nodeId, visitedNodes) {
-        if (!nodeId) return;
-
-        const parentLinks = allFileLinks.filter(
-            link => link.NodeId === nodeId && isImpactLink(link)
-        );
-
-        parentLinks.forEach(parentLink => {
-
-            linksToRender.add(parentLink);
-
-            if (!visitedNodes.has(parentLink.ParentNodeId)) {
-                visitedNodes.add(parentLink.ParentNodeId);
-                findImpactedLinks(parentLink.ParentNodeId, visitedNodes);
-            }
-        });
-    }
-
-    function findDependencyLinks(nodeId, visitedNodes) {
-        if (!nodeId) return;
-
-        const childLinks = allFileLinks.filter(
-            link => link.ParentNodeId === nodeId && isImpactLink(link)
-        );
-
-        childLinks.forEach(link => {
-            linksToRender.add(link);
-
-            if (!visitedNodes.has(link.NodeId)) {
-                visitedNodes.add(link.NodeId);
-                findDependencyLinks(link.NodeId, visitedNodes);
-            }
-        });
-    }
-
-    const visitedUp = new Set([startNodeId]);
-    const visitedDown = new Set([startNodeId]);
-
-    findImpactedLinks(startNodeId, visitedUp);
-    findDependencyLinks(startNodeId, visitedDown);
+    collectBidirectionalLinks(allFileLinks, startNodeId, isImpactLink, { linksToRender });
 
     if (linksToRender.size === 0) {
         vscode.window.showInformationMessage(`No impact or dependency references found for ${targetNode.FileName}.`);
@@ -96,7 +62,6 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
 
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
-    const edgeDetails = {};
 
     function parseCallRelationLabel(rawLinkType) {
         if (typeof rawLinkType !== 'string') {
@@ -108,28 +73,15 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
             return '';
         }
 
-        const lower = normalized.toLowerCase();
-        if (lower.startsWith('invoke:') || lower.startsWith('run:')) {
-            const parts = normalized.split(':');
-            if (parts.length > 1) {
-                const methodOrProcedure = parts[1].split(',')[0].trim();
-                if (methodOrProcedure) {
-                    const relationType = lower.startsWith('invoke:') ? 'invoke' : 'run';
-                    return `${methodOrProcedure.replace(/\s+/g, ' ')} (${relationType})`;
-                }
-            }
-            return '';
+        const invokeRunLabel = getInvokeRunDisplayLabel(normalized, { includeRelationSuffix: true });
+        if (invokeRunLabel) {
+            return invokeRunLabel;
         }
 
-        if (lower.startsWith('public-property:')) {
-            const parts = normalized.split(':');
-            if (parts.length > 1) {
-                const propertyName = parts.slice(1).join(':').trim();
-                if (propertyName) {
-                    return `${propertyName.replace(/\s+/g, ' ')} (public-property)`;
-                }
-            }
-            return '';
+        const lower = normalized.toLowerCase();
+
+        if (lower.startsWith('public-property:') || lower.startsWith('inherited-property:')) {
+            return parseNamedRelationLabel(normalized, ['public-property', 'inherited-property']);
         }
 
         return '';
@@ -137,10 +89,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
 
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
         includeLabels: true,
-        labelExtractor: link => {
-            const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
-            return rawLinkType.split(':')[0].trim();
-        },
+        labelExtractor: link => getFirstLinkTypeEntry(link.LinkType, { toLowerCase: false }),
         includeDetailLabels: true,
         detailLabelExtractor: link => parseCallRelationLabel(link.LinkType),
         preserveLinkTypeCase: false
@@ -149,32 +98,16 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const circular = getCircularEdgeKeys(edges);
 
     renderSortedEdges(edges, addEdge, {
-        circularEdgeKeys: circular,
-        labelBuilder: edge => Array.from(edge.labels).join(', ')
+        circularEdgeKeys: circular
     });
 
-    Array.from(edges.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .forEach(([, edge]) => {
-        const sourceNodeId = toMermaidNodeId(edge.sourceNode.NodeId || edge.sourceNode.FilePath || edge.sourceNode.FileName);
-        const destNodeId = toMermaidNodeId(edge.destNode.NodeId || edge.destNode.FilePath || edge.destNode.FileName);
-        const metadataKey = `${sourceNodeId}->${destNodeId}`;
-        const details = Array.from(edge.detailLabels)
-            .map(item => String(item || '').replace(/\r?\n/g, ' ').trim())
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b));
-        if (details.length > 0) {
-            edgeDetails[metadataKey] = details;
-        }
-        });
-
     const graph = getGraph();
-    const serializedEdgeDetails = JSON.stringify(edgeDetails);
-    if (serializedEdgeDetails && serializedEdgeDetails !== '{}') {
-        return `%%CROSSWAY_EDGE_DETAILS:${serializedEdgeDetails}\n${graph}`;
-    }
-
-    return graph;
+    return prependEdgeDetailsMetadata(graph, edges, {
+        includeEdgeIndexKeys: true,
+        includeEdgeMethodSigs: true,
+        links: linksToRender,
+        allFileNodes
+    });
 }
 
 module.exports = {

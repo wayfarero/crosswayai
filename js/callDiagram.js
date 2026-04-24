@@ -3,7 +3,10 @@ const {
     createMermaidGraphWriter,
     collectDirectionalLinks,
     buildLinkEdgeMap,
-    renderSortedEdges
+    renderSortedEdges,
+    prependEdgeDetailsMetadata,
+    getInvokeRunDisplayLabel,
+    getFirstLinkTypeEntry
 } = require('./diagramCommon');
 
 async function generateCallDiagram(context, uri, deps) {
@@ -51,15 +54,11 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
 
     function extractCallLabel(link) {
         const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
-        if (rawLinkType.startsWith('invoke:') || rawLinkType.startsWith('run:')) {
-            const parts = rawLinkType.split(':');
-            if (parts.length > 1) {
-                return parts[1].split(',')[0].trim();
-            }
-            return '';
+        const invokeRunLabel = getInvokeRunDisplayLabel(rawLinkType);
+        if (invokeRunLabel) {
+            return invokeRunLabel;
         }
-
-        return rawLinkType.split(':')[0].trim();
+        return getFirstLinkTypeEntry(rawLinkType, { toLowerCase: false });
     }
 
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
@@ -67,11 +66,17 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
         labelExtractor: extractCallLabel
     });
 
-    renderSortedEdges(edges, addEdge, {
-        labelBuilder: edge => Array.from(edge.labels).join(', ')
-    });
+    renderSortedEdges(edges, addEdge);
 
-    return getGraph();
+    const graph = getGraph();
+    return prependEdgeDetailsMetadata(graph, edges, {
+        includeEdgeIndexKeys: true,
+        includeEdgeMethodSigs: true,
+        includeGlobalMethodSigs: true,
+        linkFilter: filterCallLinks,
+        links: linksToRender,
+        allFileNodes
+    });
 }
 
 module.exports = {

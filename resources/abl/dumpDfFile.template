@@ -1,10 +1,12 @@
 CREATE ALIAS DICTDB FOR DATABASE <database_name>.
 DISPLAY LDBNAME("DICTDB").
 
-os-create-dir value("<workspaceRoot>\.crosswayai\dump").
+os-create-dir value("<workspaceRoot>/.crosswayai").
+os-create-dir value("<workspaceRoot>/.crosswayai/dump").
+os-create-dir value("<workspaceRoot>/.crosswayai/dump/<projectName>").
 
-RUN prodict\dump_df.p   ("ALL",
-                         "<workspaceRoot>\.crosswayai\dump\<database_name>.df",
+RUN prodict/dump_df.p   ("ALL",
+                         "<workspaceRoot>/.crosswayai/dump/<projectName>/<database_name>.df",
                           "").
 /*
 Input parameters:

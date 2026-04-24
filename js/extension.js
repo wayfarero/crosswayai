@@ -11,6 +11,7 @@ const { generateCallDiagram } = require('./callDiagram');
 const { generateInheritanceDiagram } = require('./inheritanceDiagram');
 const { generatePackageDiagram } = require('./packageDiagram');
 const { generateInstanceChainDiagram } = require('./instanceChainDiagram');
+const { generatePropertyAccessDiagram } = require('./propertyAccessDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
@@ -56,6 +57,7 @@ function activate(context) {
     const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
     const handlePackageDiagram = (ctx, uri) => generatePackageDiagram(ctx, uri, getDiagramDeps());
     const handleInstanceChainDiagram = (ctx, uri) => generateInstanceChainDiagram(ctx, uri, getDiagramDeps());
+    const handlePropertyAccessDiagram = (ctx, uri) => generatePropertyAccessDiagram(ctx, uri, getDiagramDeps());
     const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri, getCommonDeps());
     const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getCommonDeps(), dbName, workspaceRoot, pfFilePath);
     const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getCommonDeps());
@@ -72,7 +74,8 @@ function activate(context) {
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
         { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram },
         { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram },
-        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram }
+        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram },
+        { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram }
     ];
 
     setupXrefWatcher(context, getCommonDeps());

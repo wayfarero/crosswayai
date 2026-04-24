@@ -182,7 +182,7 @@
       font-size: 12px;
       line-height: 1.35;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-      pointer-events: none;
+      pointer-events: auto;
       white-space: normal;
     }
     #edgeTooltip[hidden] {
@@ -194,6 +194,42 @@
     }
     #edgeTooltip li {
       margin: 2px 0;
+    }
+    #edgeTooltip li.param-line {
+      padding-left: 12px;
+    }
+    #edgeTooltip li.param-line::marker {
+      margin-left: 12px;
+    }
+    #edgeTooltip li.active-method {
+      font-weight: 700;
+    }
+    #edgeTooltipDetail {
+      position: fixed;
+      z-index: 31;
+      max-width: min(420px, calc(100vw - 20px));
+      background: rgba(3, 7, 18, 0.95);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      pointer-events: auto;
+      white-space: normal;
+    }
+    #edgeTooltipDetail[hidden] {
+      display: none;
+    }
+    #edgeTooltipDetail .detail-title {
+      font-weight: 600;
+      margin-bottom: 0;
+      color: #f3f4f6;
+    }
+    #edgeTooltipDetail ul {
+      margin: 0;
+      padding-left: 16px;
     }
     #edgeTooltip .tooltip-title {
       margin-bottom: 8px;
@@ -270,8 +306,72 @@
     #searchCount {
       color: #9ca3af;
       font-size: 11px;
-      min-width: 20px;
+      min-width: 0;
       text-align: center;
+    }
+    .depth-filter {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 2px;
+      margin-right: 6px;
+    }
+    .depth-filter-label {
+      color: #9ca3af;
+      font-size: 12px;
+    }
+    .depth-slider-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      height: 22px;
+    }
+    #depthSlider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 90px;
+      height: 4px;
+      background: #4b5563;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      margin: 0;
+    }
+    #depthSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    #depthSlider::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    #depthBubble {
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #3b82f6;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      user-select: none;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      will-change: left;
+      transition: left 0.07s ease-out;
     }
   </style>
 </head>
@@ -285,6 +385,13 @@
         <input id="nodeSearch" type="text" placeholder="Search nodes..." autocomplete="off" spellcheck="false" />
         <span id="searchCount"></span>
       </div>
+      <div class="depth-filter" id="depthFilterControl" style="display:none;">
+        <span class="depth-filter-label">Depth:</span>
+        <div class="depth-slider-wrapper">
+          <input id="depthSlider" type="range" min="0" max="1" value="1" step="1" />
+          <div id="depthBubble">1</div>
+        </div>
+      </div>
       <button id="exportPng">Export Image</button>
       <button id="zoomIn">+</button>
       <button id="zoomOut">-</button>
@@ -294,6 +401,7 @@
     <div id="status">Ready.</div>
     <div id="legend" hidden></div>
     <div id="edgeTooltip" hidden></div>
+    <div id="edgeTooltipDetail" hidden></div>
     <div id="nodeContextMenu" hidden></div>
   </section>
 
@@ -315,10 +423,48 @@
     const diagram = document.getElementById('diagram');
     const legend = document.getElementById('legend');
     const edgeTooltip = document.getElementById('edgeTooltip');
+    const edgeTooltipDetail = document.getElementById('edgeTooltipDetail');
     const nodeContextMenu = document.getElementById('nodeContextMenu');
 
     const params = new URLSearchParams(window.location.search);
     const defaultMarkdownPath = params.get('file') || '.crosswayai/mermaid/impact_runAnalysis.p.md';
+
+    // ── Depth Filter State ──────────────────────────────────────────────────
+    // The depth filter lets users limit how many "hops" from the source node
+    // are shown. It works by pre-computing the depth of every node/edge after
+    // Mermaid renders the SVG, then toggling display:none on slider change.
+    //
+    // depthFilterData is populated inside activateDiagramInteractivity() after
+    // each render. It holds pre-collected { element, depth } entries so the
+    // slider handler only needs to iterate a flat array.
+    const depthFilterControl = document.getElementById('depthFilterControl');
+    const depthSliderEl = document.getElementById('depthSlider');
+    const depthBubbleEl = document.getElementById('depthBubble');
+    let depthFilterData = null; // { nodeEntries, edgeEntries, labelEntries, maxDepth }
+
+    // Positions the on-thumb number circle to match the native (invisible) thumb.
+    // skipTransition=true on first call prevents an ugly slide-in from the left.
+    function updateDepthBubble(val, skipTransition) {
+      const min = parseInt(depthSliderEl.min, 10) || 0;
+      const max = parseInt(depthSliderEl.max, 10) || 1;
+      const percent = max > min ? (val - min) / (max - min) : 1;
+      const thumbWidth = 22; // matches the CSS width of the invisible native thumb
+      const left = percent * (depthSliderEl.offsetWidth - thumbWidth) + thumbWidth / 2;
+      if (skipTransition) {
+        // Temporarily kill the CSS transition so the bubble snaps to position
+        // immediately rather than animating from wherever it was before.
+        depthBubbleEl.style.transition = 'none';
+        depthBubbleEl.style.left = `${left}px`;
+        void depthBubbleEl.offsetWidth; // force reflow to commit the no-transition frame
+        depthBubbleEl.style.transition = ''; // restore the CSS transition
+      } else {
+        depthBubbleEl.style.left = `${left}px`;
+      }
+      depthBubbleEl.textContent = String(val);
+      // Paint the track: blue on the left of the thumb, gray on the right
+      const pct = (percent * 100).toFixed(1);
+      depthSliderEl.style.background = `linear-gradient(to right, #3b82f6 ${pct}%, #4b5563 ${pct}%)`;
+    }
 
     let LINK_TYPE_COLORS = {
       selected: '#f97316',
@@ -350,13 +496,44 @@
         .replace(/'/g, '&#39;');
     }
 
-    function hideEdgeTooltip(force = false) {
-      if (!force && window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+    function isAnyEdgeTooltipPinned() {
+      return Boolean(window.CROSSWAY_EDGE_TOOLTIP_PINNED || window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED);
+    }
+
+    function clearPinnedEdgeDetail() {
+      window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED = false;
+      window.CROSSWAY_EDGE_DETAIL_PINNED_KEY = null;
+    }
+
+    function clearAllPinnedEdgeTooltips() {
+      window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+      clearPinnedEdgeDetail();
+    }
+
+    function pinEdgeDetail(detailKey) {
+      window.CROSSWAY_EDGE_TOOLTIP_PINNED = true;
+      window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED = true;
+      window.CROSSWAY_EDGE_DETAIL_PINNED_KEY = detailKey;
+    }
+
+    function hideEdgeTooltipDetail() {
+      if (!edgeTooltipDetail) {
         return;
       }
+      edgeTooltipDetail.hidden = true;
+      edgeTooltipDetail.innerHTML = '';
+    }
+
+    function hideEdgeTooltip(force = false) {
+      const isNodeTooltip = edgeTooltip.classList.contains('node-tooltip');
+      if (!force && isAnyEdgeTooltipPinned() && !isNodeTooltip) {
+        return;
+      }
+      clearPinnedEdgeDetail();
       edgeTooltip.classList.remove('node-tooltip');
       edgeTooltip.hidden = true;
       edgeTooltip.innerHTML = '';
+      hideEdgeTooltipDetail();
     }
 
     function positionEdgeTooltip(clientX, clientY) {
@@ -402,16 +579,57 @@
       edgeTooltip.style.top = `${top}px`;
     }
 
-    function showEdgeTooltip(items, event) {
+    function showEdgeTooltip(items, event, metadataKey = null) {
       if (!items || items.length === 0) {
         hideEdgeTooltip();
         return;
       }
 
+      const methodSigsRaw = metadataKey ? (window.CROSSWAY_EDGE_METHOD_SIGS?.[metadataKey] || null) : null;
+      const globalMethodSigsRaw = window.CROSSWAY_GLOBAL_METHOD_SIGS || null;
+      const getMethodSignatures = (methodName) => {
+        if (!methodSigsRaw) {
+          if (globalMethodSigsRaw && globalMethodSigsRaw[methodName]) {
+            const globalEntry = globalMethodSigsRaw[methodName];
+            return Array.isArray(globalEntry) ? globalEntry.slice() : (globalEntry ? [globalEntry] : ['']);
+          }
+          return [];
+        }
+        if (Array.isArray(methodSigsRaw)) {
+          return methodSigsRaw
+            .filter(entry => entry && entry.name === methodName)
+            .map(entry => entry.params)
+            ;
+        }
+        if (typeof methodSigsRaw === 'object') {
+          const entry = methodSigsRaw[methodName];
+          if (Array.isArray(entry)) {
+            return entry.slice();
+          }
+          if (entry) {
+            return [entry];
+          }
+        }
+        if (globalMethodSigsRaw && globalMethodSigsRaw[methodName]) {
+          const globalEntry = globalMethodSigsRaw[methodName];
+          return Array.isArray(globalEntry) ? globalEntry.slice() : (globalEntry ? [globalEntry] : ['']);
+        }
+        return [];
+      };
       const renderedItems = items
         .map((item) => String(item || '').trim())
         .filter(Boolean)
-        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .map((item) => {
+          const isParams = /^params\s*:/i.test(item);
+          const methodKey = item.replace(/\s*\((invoke|run)\)\s*/i, '').trim();
+          const signatures = getMethodSignatures(methodKey);
+          const isCall = /\((invoke|run)\)\s*$/i.test(item) || signatures.length > 0;
+          const cls = isParams ? ' class="param-line"' : ' class="method-item"';
+          const sigAttr = isParams
+            ? ''
+            : ` data-signature="${escapeHtml(signatures.join('|||'))}" data-method="${escapeHtml(methodKey)}" data-is-call="${isCall ? 'true' : 'false'}"`;
+          return `<li${cls}${sigAttr}>${escapeHtml(item)}</li>`;
+        })
         .join('');
 
       if (!renderedItems) {
@@ -423,6 +641,129 @@
       edgeTooltip.classList.remove('node-tooltip');
       edgeTooltip.hidden = false;
       positionEdgeTooltip(event.clientX, event.clientY);
+      clearPinnedEdgeDetail();
+      hideEdgeTooltipDetail();
+
+      if (edgeTooltipDetail) {
+        const tooltipRows = edgeTooltip.querySelectorAll('li');
+          tooltipRows.forEach((li) => {
+            const isMethodRow = li.classList.contains('method-item');
+            const renderMethodDetail = () => {
+              const methodName = li.getAttribute('data-method') || '';
+              const signatureRaw = li.getAttribute('data-signature') || '';
+              const signatureList = signatureRaw.split('|||').map(item => item.trim());
+              const normalizedSignatures = signatureList.map(signature => signature.trim());
+              const hasNonEmpty = normalizedSignatures.some(signature => signature);
+              const hasEmpty = normalizedSignatures.some(signature => !signature);
+              const entries = [];
+              if (!signatureRaw) {
+                entries.push('( )');
+              }
+              if (hasEmpty && hasNonEmpty) {
+                entries.push('( )');
+              }
+              normalizedSignatures
+                .filter(signature => signature)
+                .forEach(signature => {
+                  entries.push(`(${signature})`);
+                });
+              const signatureItems = entries
+                .map(entry => `<li>${escapeHtml(entry)}</li>`)
+                .join('');
+              const signatureListHtml = signatureItems ? `<ul>${signatureItems}</ul>` : '';
+              edgeTooltipDetail.innerHTML = `<div class="detail-title">${escapeHtml(methodName)}</div>${signatureListHtml}`;
+              edgeTooltipDetail.hidden = false;
+              const tooltipRect = edgeTooltip.getBoundingClientRect();
+              const liRect = li.getBoundingClientRect();
+              let left = tooltipRect.right + 8;
+              let top = liRect.top - 4;
+              edgeTooltipDetail.style.left = `${left}px`;
+              edgeTooltipDetail.style.top = `${top}px`;
+              const detailRect = edgeTooltipDetail.getBoundingClientRect();
+              if (detailRect.right > window.innerWidth - 8) {
+                left = tooltipRect.left - detailRect.width - 8;
+                edgeTooltipDetail.style.left = `${left}px`;
+              }
+            };
+
+            const getDetailKey = () => {
+              const methodName = li.getAttribute('data-method') || '';
+              const signatureRaw = li.getAttribute('data-signature') || '';
+              return `${methodName}::${signatureRaw}`;
+            };
+
+            const isPinnedDetailRow = () => {
+              return window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED
+                && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY
+                && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY === getDetailKey();
+            };
+
+            li.addEventListener('mouseenter', () => {
+              if (isMethodRow && window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED && !isPinnedDetailRow()) {
+                return;
+              }
+              li.classList.add('active-method');
+              if (!isMethodRow) {
+                return;
+              }
+              const isCall = li.getAttribute('data-is-call') === 'true';
+              if (!isCall) {
+                if (!window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED) {
+                  hideEdgeTooltipDetail();
+                }
+                return;
+              }
+              const signatureRaw = li.getAttribute('data-signature') || '';
+              const methodName = li.getAttribute('data-method') || '';
+              const detailKey = `${methodName}::${signatureRaw}`;
+              if (window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY !== detailKey) {
+                return;
+              }
+              renderMethodDetail();
+            });
+            li.addEventListener('click', (event) => {
+              if (!isMethodRow) {
+                return;
+              }
+              const isCall = li.getAttribute('data-is-call') === 'true';
+              if (!isCall) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              const signatureRaw = li.getAttribute('data-signature') || '';
+              const methodName = li.getAttribute('data-method') || '';
+              const detailKey = `${methodName}::${signatureRaw}`;
+              const isAlreadyPinned = window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY === detailKey;
+              if (isAlreadyPinned) {
+                clearPinnedEdgeDetail();
+                li.classList.remove('active-method');
+                hideEdgeTooltipDetail();
+                return;
+              }
+              edgeTooltip.querySelectorAll('.method-item.active-method').forEach((item) => {
+                item.classList.remove('active-method');
+              });
+              li.classList.add('active-method');
+              pinEdgeDetail(detailKey);
+              renderMethodDetail();
+          });
+            li.addEventListener('mouseleave', (event) => {
+              if (isMethodRow && (window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED || isPinnedDetailRow())) {
+                return;
+              }
+              const related = event.relatedTarget;
+              if (edgeTooltipDetail && related && edgeTooltipDetail.contains(related)) {
+                return;
+              }
+              li.classList.remove('active-method');
+              if (!isMethodRow) {
+                return;
+              }
+              hideEdgeTooltipDetail();
+            });
+          });
+      }
     }
 
     function showNodeTooltip(itemsByDatabase, event) {
@@ -512,9 +853,10 @@
         '</div>',
         '<div class="legend-body">',
         buildLegendRow('include', 'include'),
-        buildLegendRow('run', 'run / invoke'),
+        buildLegendRow('call', 'run / invoke'),
+        buildLegendRow('cast', 'cast'),
         buildLegendRow('new', 'new'),
-        buildLegendRow('public-property', 'public-property'),
+        buildLegendRow('property', 'property'),
         buildLegendRow('inherits', 'inherits'),
         buildLegendRow('implements', 'implements'),
         buildLegendRow('circular', 'circular'),
@@ -589,7 +931,7 @@
       let activeSelection = null;
       let lockedNode = null;
       let pendingNodeClickTimer = null;
-      window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+      clearAllPinnedEdgeTooltips();
 
       function openNodeFile(nodeId) {
         const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
@@ -1068,40 +1410,58 @@
         return toUniqueList(values).filter((item) => !blocked.has(item.toLowerCase()));
       }
 
-      function getEdgeTooltipItems(edgeEl, edgeElementOrder, fallbackLabelsByEdge) {
+      const edgeIndexKeys = Array.isArray(window.CROSSWAY_EDGE_INDEX_KEYS)
+        ? window.CROSSWAY_EDGE_INDEX_KEYS
+        : [];
+
+      function getEdgeTooltipItems(edgeEl, edgeElementOrder, fallbackLabelsByEdge, edgeMetadataKeyByEdge) {
         const edgeIds = getEdgeIdentity(edgeEl);
         if (edgeIds) {
           const metadataKey = `${edgeIds.from}->${edgeIds.to}`;
           const metadataItems = window.CROSSWAY_EDGE_DETAILS?.[metadataKey];
           if (Array.isArray(metadataItems) && metadataItems.length > 0) {
-            return filterTooltipCallItems(metadataItems);
+            return { items: filterTooltipCallItems(metadataItems), metadataKey };
           }
 
           const idMappedItems = fallbackLabelsByEdge.get(metadataKey);
           if (idMappedItems && idMappedItems.length > 0) {
-            return filterTooltipCallItems(idMappedItems);
+            return { items: filterTooltipCallItems(idMappedItems), metadataKey };
           }
         }
 
         const mappedFallbackItems = fallbackLabelsByEdge.get(edgeEl);
         if (mappedFallbackItems && mappedFallbackItems.length > 0) {
-          return filterTooltipCallItems(mappedFallbackItems);
+          const metadataKey = edgeMetadataKeyByEdge?.get(edgeEl) || null;
+          return { items: filterTooltipCallItems(mappedFallbackItems), metadataKey };
         }
 
         const edgeIndex = edgeElementOrder.indexOf(edgeEl);
         if (edgeIndex >= 0) {
+          let metadataKeyFromIndex = null;
+          if (edgeIndexKeys.length > edgeIndex) {
+            metadataKeyFromIndex = edgeIndexKeys[edgeIndex];
+            const metadataItems = window.CROSSWAY_EDGE_DETAILS?.[metadataKeyFromIndex];
+            if (Array.isArray(metadataItems) && metadataItems.length > 0) {
+              return { items: filterTooltipCallItems(metadataItems), metadataKey: metadataKeyFromIndex };
+            }
+            const idMappedItems = fallbackLabelsByEdge.get(metadataKeyFromIndex);
+            if (idMappedItems && idMappedItems.length > 0) {
+              return { items: filterTooltipCallItems(idMappedItems), metadataKey: metadataKeyFromIndex };
+            }
+          }
           const indexMappedItems = fallbackLabelsByEdge.get(edgeIndex);
           if (indexMappedItems && indexMappedItems.length > 0) {
-            return filterTooltipCallItems(indexMappedItems);
+            return { items: filterTooltipCallItems(indexMappedItems), metadataKey: metadataKeyFromIndex };
           }
         }
 
-        return [];
+        return { items: [], metadataKey: null };
       }
       
       const allDiagramEdges = getDiagramEdgeElements(svg);
       const edgeLabelGroups = getEdgeLabelGroups(svg);
       const fallbackLabelsByEdge = new Map();
+      const edgeMetadataKeyByEdge = new Map();
 
       edgeLabelGroups.forEach((labelGroup, index) => {
         const labelText = (labelGroup.textContent || '').trim();
@@ -1125,56 +1485,69 @@
 
         if (index < allDiagramEdges.length) {
           fallbackLabelsByEdge.set(allDiagramEdges[index], parsedItems);
+          if (edgeIndexKeys.length > index) {
+            edgeMetadataKeyByEdge.set(allDiagramEdges[index], edgeIndexKeys[index]);
+          }
         }
 
         fallbackLabelsByEdge.set(index, parsedItems);
       });
 
-      allDiagramEdges.forEach((edgeEl) => {
-        if (!isDiagramEdgeElement(edgeEl)) {
-          return;
-        }
 
-        edgeEl.style.cursor = 'pointer';
-        const clickTarget = createClickTargetForEdge(edgeEl);
-        edgeEl.parentNode.insertBefore(clickTarget, edgeEl.nextSibling);
-
+      function registerEdgeEventListeners(edgeEl, clickTarget) {
         clickTarget.addEventListener('click', (event) => {
           event.stopPropagation();
           event.preventDefault();
-
           if (activeSelection && activeSelection.pathElement === edgeEl) {
             clearActiveSelection();
-            window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+            clearAllPinnedEdgeTooltips();
             hideEdgeTooltip(true);
             return;
           } else {
             highlightEdge(edgeEl);
           }
-
-          const items = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge);
-          window.CROSSWAY_EDGE_TOOLTIP_PINNED = true;
-          showEdgeTooltip(items, event);
-        });
-
-        clickTarget.addEventListener('mouseenter', (event) => {
-          if (window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+          const { items, metadataKey } = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge, edgeMetadataKeyByEdge);
+          if (!items || items.length === 0) {
+            clearAllPinnedEdgeTooltips();
+            hideEdgeTooltip(true);
             return;
           }
-          const items = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge);
-          showEdgeTooltip(items, event);
+          window.CROSSWAY_EDGE_TOOLTIP_PINNED = true;
+          showEdgeTooltip(items, event, metadataKey);
         });
-
+        clickTarget.addEventListener('mouseenter', (event) => {
+          if (isAnyEdgeTooltipPinned()) {
+            return;
+          }
+          const { items, metadataKey } = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge, edgeMetadataKeyByEdge);
+          showEdgeTooltip(items, event, metadataKey);
+        });
         clickTarget.addEventListener('mousemove', (event) => {
-          if (edgeTooltip.hidden || window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+          if (edgeTooltip.hidden || isAnyEdgeTooltipPinned()) {
             return;
           }
           positionEdgeTooltip(event.clientX, event.clientY);
         });
-
-        clickTarget.addEventListener('mouseleave', () => {
+        clickTarget.addEventListener('mouseleave', (event) => {
+          const related = event.relatedTarget;
+          if (edgeTooltip && related && edgeTooltip.contains(related)) {
+            return;
+          }
+          if (edgeTooltipDetail && related && edgeTooltipDetail.contains(related)) {
+            return;
+          }
           hideEdgeTooltip();
         });
+      }
+
+      allDiagramEdges.forEach((edgeEl) => {
+        if (!isDiagramEdgeElement(edgeEl)) {
+          return;
+        }
+        edgeEl.style.cursor = 'pointer';
+        const clickTarget = createClickTargetForEdge(edgeEl);
+        edgeEl.parentNode.insertBefore(clickTarget, edgeEl.nextSibling);
+        registerEdgeEventListeners(edgeEl, clickTarget);
       });
 
       function resetNodeInteractionUi(event, { preventDefault = false } = {}) {
@@ -1184,7 +1557,7 @@
           }
           event.stopPropagation();
         }
-        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearAllPinnedEdgeTooltips();
         hideEdgeTooltip(true);
         hideNodeContextMenu();
         if (pendingNodeClickTimer) {
@@ -1193,48 +1566,51 @@
         }
       }
 
+      if (edgeTooltip) {
+        edgeTooltip.addEventListener('mouseleave', (event) => {
+          const related = event.relatedTarget;
+          if (edgeTooltipDetail && related && edgeTooltipDetail.contains(related)) {
+            return;
+          }
+          hideEdgeTooltip();
+        });
+      }
+
       const allNodes = svg.querySelectorAll('.node'); 
 
-      allNodes.forEach(node => {
 
+      function registerNodeEventListeners(node) {
         node.addEventListener('mouseenter', (event) => {
-
           if (lockedNode) return;
-
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
-
           const highlight = getHighlightSubgraph(nodeId, svg);
           fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
-
+          if (isAnyEdgeTooltipPinned()) {
+            return;
+          }
           const nodeDetails = window.CROSSWAY_NODE_DETAILS?.[nodeId];
           if (nodeDetails && Object.keys(nodeDetails).length > 0) {
             showNodeTooltip(nodeDetails, event);
           } else {
             hideEdgeTooltip();
           }
-
         });
-
         node.addEventListener('mousemove', (event) => {
-          if (edgeTooltip.hidden || window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
+          if (edgeTooltip.hidden || isAnyEdgeTooltipPinned()) {
             return;
           }
           positionEdgeTooltip(event.clientX, event.clientY);
         });
-
         node.addEventListener('mouseleave', () => {
           if (lockedNode) return;
           resetGraphFade(svg);
           hideEdgeTooltip();
         });
-
         node.addEventListener('click', (event) => {
           resetNodeInteractionUi(event);
-
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
-
           pendingNodeClickTimer = window.setTimeout(() => {
             pendingNodeClickTimer = null;
             if (lockedNode === nodeId) {
@@ -1242,25 +1618,22 @@
               resetGraphFade(svg);
               return;
             }
-
             lockedNode = nodeId;
             const highlight = getHighlightSubgraph(nodeId, svg);
             fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
           }, NODE_DOUBLE_CLICK_DELAY_MS);
         });
-
         node.addEventListener('dblclick', (event) => {
           resetNodeInteractionUi(event, { preventDefault: true });
-
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
-
           if (openNodeFile(nodeId)) {
             setStatus('Opened file from node.');
           }
         });
+      }
 
-      });
+      allNodes.forEach(registerNodeEventListeners);
       
 
 
@@ -1339,94 +1712,14 @@
       // ── End node context menu ───────────────────────────────────────
 
 
-      function highlightArrow(pathElement, pathId, color, svgElement) {
-        const originalStroke = pathElement.getAttribute('stroke') || '#000';
-        const originalStrokeWidth = pathElement.getAttribute('stroke-width') || '2';
-
-        // Store original values for reset
-        pathElement.dataset.originalStroke = originalStroke;
-        pathElement.dataset.originalStrokeWidth = originalStrokeWidth;
-        pathElement.dataset.isHighlighted = 'true';
-
-        // Change the arrow itself to red and thicker
-        pathElement.setAttribute('stroke', color);
-        pathElement.setAttribute('stroke-width', '4');
-
-        const overlayLayer = createOrGetOverlayLayer(svgElement);
-        if (overlayLayer) {
-          const overlayPath = pathElement.cloneNode(true);
-          const safePathId = String(pathId || 'path').replace(/[^a-zA-Z0-9_-]/g, '_');
-          const overlayId = `highlight-overlay-${safePathId}-${Date.now()}`;
-          overlayPath.setAttribute('id', overlayId);
-          overlayPath.setAttribute('stroke', color);
-          overlayPath.setAttribute('stroke-width', '4');
-          overlayPath.setAttribute('fill', 'none');
-          overlayPath.style.pointerEvents = 'none';
-          overlayLayer.appendChild(overlayPath);
-          pathElement.dataset.highlightOverlayId = overlayId;
-        }
-
-        // Find and highlight connected nodes
-        const allGroups = svgElement.querySelectorAll('g[id*="node-"]');
-        allGroups.forEach((group) => {
-          const rect = group.querySelector('rect');
-          if (rect) {
-            // Add colored border/highlight boxes
-            const highlightBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            const x = parseFloat(rect.getAttribute('x'));
-            const y = parseFloat(rect.getAttribute('y'));
-            const width = parseFloat(rect.getAttribute('width'));
-            const height = parseFloat(rect.getAttribute('height'));
-
-            highlightBox.setAttribute('x', x - HIGHLIGHT_BOX_PADDING);
-            highlightBox.setAttribute('y', y - HIGHLIGHT_BOX_PADDING);
-            highlightBox.setAttribute('width', width + (HIGHLIGHT_BOX_PADDING * 2));
-            highlightBox.setAttribute('height', height + (HIGHLIGHT_BOX_PADDING * 2));
-            highlightBox.setAttribute('fill', 'none');
-            highlightBox.setAttribute('stroke', color);
-            highlightBox.setAttribute('stroke-width', '2');
-            highlightBox.setAttribute('stroke-dasharray', '5,5');
-            highlightBox.setAttribute('rx', '4');
-            highlightBox.setAttribute('class', `highlight-box-${pathId}`);
-            highlightBox.style.pointerEvents = 'none';
-
-            group.appendChild(highlightBox);
-          }
-        });
-      }
-
-      function removeArrowHighlight(pathId, svgElement, pathElement) {
-        if (pathElement && pathElement.dataset.isHighlighted === 'true') {
-          // Restore original stroke and width
-          pathElement.setAttribute('stroke', pathElement.dataset.originalStroke);
-          pathElement.setAttribute('stroke-width', pathElement.dataset.originalStrokeWidth);
-          pathElement.dataset.isHighlighted = 'false';
-
-          const overlayId = pathElement.dataset.highlightOverlayId;
-          if (overlayId) {
-            const overlayPath = svgElement.querySelector(`[id="${overlayId}"]`);
-            if (overlayPath) {
-              overlayPath.remove();
-            }
-            delete pathElement.dataset.highlightOverlayId;
-          }
-
-          // Remove highlight boxes
-          const highlightBoxes = svgElement.querySelectorAll(`.highlight-box-${pathId}`);
-          highlightBoxes.forEach((box) => box.remove());
-        }
-      }
       svg.addEventListener('click', () => {
         if (window.CROSSWAY_IGNORE_NEXT_SVG_CLICK) {
           window.CROSSWAY_IGNORE_NEXT_SVG_CLICK = false;
           return;
         }
 
-        if (activeSelection && window.CROSSWAY_EDGE_TOOLTIP_PINNED) {
-          return;
-        }
-
-        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearAllPinnedEdgeTooltips();
+        clearActiveSelection();
         lockedNode = null;
         resetGraphFade(svg);
         hideEdgeTooltip(true);
@@ -1447,7 +1740,7 @@
         const hadActiveEdgeSelection = Boolean(activeSelection);
         const hadLockedNode = Boolean(lockedNode);
 
-        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearAllPinnedEdgeTooltips();
         clearActiveSelection();
         hideEdgeTooltip(true);
 
@@ -1463,6 +1756,115 @@
       };
       window.CROSSWAY_KEYDOWN_HANDLER = onKeyDown;
       document.addEventListener('keydown', onKeyDown);
+
+      // ── Depth Filter Computation ─────────────────────────────────────────
+      // HOW IT WORKS:
+      // 1. Build an adjacency graph from the SVG arrows (edges)
+      // 2. BFS from the source node to assign a "depth" (hop count) to every node
+      // 3. Pre-collect all SVG elements with their depth, so the slider handler
+      //    can toggle display:none without any DOM queries
+      //
+      // The slider only appears for diagrams that have a source node
+      // (Impact, Inheritance, Interface, etc. — NOT Package or Table Relations).
+      // ────────────────────────────────────────────────────────────────────────
+      if (window.CROSSWAY_SOURCE_NODE) {
+        // Step 1: Build adjacency lists from the rendered SVG edges.
+        // outgoing = arrows going OUT from a node
+        // incoming = arrows coming IN to a node
+        const { outgoing, incoming } = buildEdgeGraph(svg);
+
+        // Step 2: BFS (Breadth-First Search) from the source node.
+        // We traverse BOTH directions (outgoing + incoming) because Impact
+        // Diagrams show dependencies in both directions — "what I depend on"
+        // and "what depends on me". Depth = minimum number of hops from source.
+        const depthMap = new Map();
+        const sourceId = window.CROSSWAY_SOURCE_NODE;
+        depthMap.set(sourceId, 0);
+        const bfsQueue = [{ id: sourceId, depth: 0 }];
+        while (bfsQueue.length > 0) {
+          const { id, depth } = bfsQueue.shift();
+          // Combine both outgoing and incoming neighbors — bidirectional traversal
+          const neighbors = [
+            ...(outgoing.get(id) || []),
+            ...(incoming.get(id) || [])
+          ];
+          neighbors.forEach(neighborId => {
+            // Only visit each node once — depthMap.has() prevents revisiting
+            // and also prevents infinite loops in graphs with circular references
+            if (!depthMap.has(neighborId)) {
+              depthMap.set(neighborId, depth + 1);
+              bfsQueue.push({ id: neighborId, depth: depth + 1 });
+            }
+          });
+        }
+
+        // Find the maximum depth across all reachable nodes
+        let maxDepth = 0;
+        depthMap.forEach(d => { if (d > maxDepth) maxDepth = d; });
+
+        // Step 3: Pre-collect SVG elements paired with their computed depths.
+        // This is the key performance optimization — we query the DOM once here,
+        // then the slider handler just iterates these flat arrays.
+
+        // 3a: Collect all node <g> elements (the boxes in the diagram)
+        const dfNodeEntries = [];
+        svg.querySelectorAll('.node').forEach(nodeEl => {
+          const nodeId = getNodeIdentity(nodeEl);
+          // depth=null means this node wasn't reached by BFS (shouldn't happen
+          // in a connected diagram, but safe fallback — will always be shown)
+          const d = nodeId && depthMap.has(nodeId) ? depthMap.get(nodeId) : null;
+          dfNodeEntries.push({ element: nodeEl, depth: d });
+        });
+
+        // 3b: Collect all edge <path> elements (the arrows between boxes)
+        // An edge's depth = max(fromDepth, toDepth), because an edge connecting
+        // depth 1 and depth 2 should only show at depth level 2 or higher.
+        const allDfEdges = getDiagramEdgeElements(svg);
+        const dfEdgeEntries = allDfEdges.map(edgeEl => {
+          const edgeIds = getEdgeIdentity(edgeEl);
+          if (!edgeIds) return { element: edgeEl, depth: null };
+          const fd = depthMap.has(edgeIds.from) ? depthMap.get(edgeIds.from) : null;
+          const td = depthMap.has(edgeIds.to) ? depthMap.get(edgeIds.to) : null;
+          return { element: edgeEl, depth: (fd !== null && td !== null) ? Math.max(fd, td) : null };
+        });
+
+        // 3c: Collect edge label <g> elements (text on the arrows like "new", "invoke")
+        // Uses same depth logic as edges. Falls back to index-based mapping if
+        // the label element doesn't have its own edge identity.
+        const dfLabelEntries = getEdgeLabelGroups(svg).map((labelEl, index) => {
+          const edgeIds = getEdgeIdentity(labelEl);
+          let d = null;
+          if (edgeIds) {
+            const fd = depthMap.has(edgeIds.from) ? depthMap.get(edgeIds.from) : null;
+            const td = depthMap.has(edgeIds.to) ? depthMap.get(edgeIds.to) : null;
+            if (fd !== null && td !== null) d = Math.max(fd, td);
+          } else if (dfEdgeEntries[index]) {
+            // Fallback: if Mermaid didn't put edge IDs on this label, assume it
+            // corresponds to the edge at the same render index
+            d = dfEdgeEntries[index].depth;
+          }
+          return { element: labelEl, depth: d };
+        });
+
+        // Step 4: Configure the slider UI and store the pre-collected data
+        if (maxDepth > 0) {
+          depthFilterData = { nodeEntries: dfNodeEntries, edgeEntries: dfEdgeEntries, labelEntries: dfLabelEntries, maxDepth };
+          depthSliderEl.min = '0';
+          depthSliderEl.max = String(maxDepth);
+          depthSliderEl.value = String(maxDepth); // Start fully expanded
+          depthFilterControl.style.display = 'flex';
+          // Position the bubble without animation — the slider has just appeared
+          // so we don't want it to slide in from a stale position.
+          updateDepthBubble(maxDepth, true);
+        } else {
+          depthFilterData = null;
+          depthFilterControl.style.display = 'none';
+        }
+      } else {
+        // No source node (e.g. Package Diagram) — hide the depth slider
+        depthFilterData = null;
+        depthFilterControl.style.display = 'none';
+      }
     }
 
     function normalizeErKeySyntax(code) {
@@ -1487,45 +1889,6 @@
       }
 
       return layer;
-    }
-
-    function bringRelationshipLayersToFront(svg) {
-      if (!svg) {
-        return;
-      }
-
-      const candidates = [
-        '.edgePaths',
-        '.edgeLabels',
-        '.relationships',
-        '.relationshipLine',
-        'g[class*="edge"]',
-        'g[class*="relationship"]',
-        'g[id*="edge"]',
-        'g[id*="rel"]'
-      ];
-      const moved = new Set();
-
-      for (const selector of candidates) {
-        const groups = svg.querySelectorAll(selector);
-        groups.forEach((group) => {
-          if (!group || !group.parentNode || moved.has(group)) {
-            return;
-          }
-          group.parentNode.appendChild(group);
-          moved.add(group);
-        });
-      }
-
-      const edgePaths = svg.querySelectorAll('path[marker-end], path[marker-start], path.relationshipLine');
-      edgePaths.forEach((path) => {
-        if (!path || !path.parentNode || path.closest('defs')) {
-          return;
-        }
-        path.parentNode.appendChild(path);
-      });
-
-      createOrGetOverlayLayer(svg);
     }
 
     function organizeErDiagram(code) {
@@ -1842,14 +2205,56 @@
       return rebuilt.join('\n');
     }
 
+    // ── Depth Filter: Apply ────────────────────────────────────────────────
+    // Called on every slider change. Iterates the PRE-COLLECTED element arrays
+    // and toggles display:none based on depth.
+    //
+    // We use requestAnimationFrame to batch all DOM writes into a single paint
+    // frame, avoiding jank when the user drags the slider quickly.
+    // ───────────────────────────────────────────────────────────────────────
+    function applyDepthFilter(maxShow) {
+      if (!depthFilterData) return;
+      const { nodeEntries, edgeEntries, labelEntries } = depthFilterData;
+
+      requestAnimationFrame(() => {
+        // Show/hide elements based on their depth relative to the slider value.
+        nodeEntries.forEach(({ element, depth }) => {
+          element.style.display = (depth === null || depth <= maxShow) ? '' : 'none';
+        });
+
+        edgeEntries.forEach(({ element, depth }) => {
+          element.style.display = (depth === null || depth <= maxShow) ? '' : 'none';
+        });
+
+        labelEntries.forEach(({ element, depth }) => {
+          element.style.display = (depth === null || depth <= maxShow) ? '' : 'none';
+        });
+        // Sync the invisible click-target overlays that activateDiagramInteractivity()
+        // creates for each edge (used for click/hover detection on thin arrows).
+        // Each click-target is the nextSibling of its corresponding <path> element,
+        // so we check if the previous sibling (the actual edge) is hidden.
+        const svg = diagram.querySelector('svg');
+        if (svg) {
+          svg.querySelectorAll('.crosswayai-click-target').forEach(ct => {
+            const prev = ct.previousElementSibling;
+            ct.style.display = (prev && prev.style.display === 'none') ? 'none' : '';
+          });
+        }
+      });
+    }
+
     async function renderDiagram(code, markdownPath = defaultMarkdownPath) {
       const mermaidCode = organizeErDiagram(normalizeErKeySyntax(code)).trim();
       window.CROSSWAY_IS_PACKAGE_DIAGRAM = isPackageDiagram(code, markdownPath);
       window.CROSSWAY_PARENT_MAP = {};
       window.CROSSWAY_SOURCE_NODE = null;
       window.CROSSWAY_EDGE_DETAILS = {};
+      window.CROSSWAY_EDGE_METHOD_SIGS = {};
+      window.CROSSWAY_EDGE_INDEX_KEYS = [];
+      window.CROSSWAY_GLOBAL_METHOD_SIGS = {};
       window.CROSSWAY_NODE_DETAILS = {};
       window.CROSSWAY_FILE_MAP = {};
+
       const sourceNodeMatch = (code || '').match(/^\s*%%CROSSWAY_SOURCE_NODE:(.*)$/m);
       if (sourceNodeMatch) {
         window.CROSSWAY_SOURCE_NODE = sourceNodeMatch[1].trim() || null;
@@ -1870,6 +2275,34 @@
           window.CROSSWAY_EDGE_DETAILS = {};
         }
       }
+
+      const edgeMethodSigMatch = (code || '').match(/^\s*%%CROSSWAY_EDGE_METHOD_SIGS:(.*)$/m);
+      const edgeIndexKeysMatch = (code || '').match(/^\s*%%CROSSWAY_EDGE_INDEX_KEYS:(.*)$/m);
+      const globalMethodSigMatch = (code || '').match(/^\s*%%CROSSWAY_GLOBAL_METHOD_SIGS:(.*)$/m);
+      if (edgeMethodSigMatch) {
+        try {
+          window.CROSSWAY_EDGE_METHOD_SIGS = JSON.parse(edgeMethodSigMatch[1]);
+        } catch {
+          window.CROSSWAY_EDGE_METHOD_SIGS = {};
+        }
+      }
+      
+      if (edgeIndexKeysMatch) {
+        try {
+          window.CROSSWAY_EDGE_INDEX_KEYS = JSON.parse(edgeIndexKeysMatch[1]);
+        } catch {
+          window.CROSSWAY_EDGE_INDEX_KEYS = [];
+        }
+      }
+
+      if (globalMethodSigMatch) {
+        try {
+          window.CROSSWAY_GLOBAL_METHOD_SIGS = JSON.parse(globalMethodSigMatch[1]);
+        } catch {
+          window.CROSSWAY_GLOBAL_METHOD_SIGS = {};
+        }
+      }
+
       const nodeDetailsMatch = (code || '').match(/^\s*%%CROSSWAY_NODE_DETAILS:(.*)$/m);
       if (nodeDetailsMatch) {
         try {
@@ -1878,6 +2311,7 @@
           window.CROSSWAY_NODE_DETAILS = {};
         }
       }
+
       const fileMapMatch = (code || '').match(/^\s*%%CROSSWAY_FILE_MAP:(.*)$/m);
       if (fileMapMatch) {
         try {
@@ -1900,7 +2334,7 @@
 
       try {
         diagram.innerHTML = '';
-        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearAllPinnedEdgeTooltips();
         hideEdgeTooltip(true);
         nodeContextMenu.hidden = true;
         nodeContextMenu.innerHTML = '';
@@ -2301,6 +2735,14 @@
 
     // Prevent pan/drag when interacting with the search input
     nodeSearchInput.addEventListener('mousedown', (event) => event.stopPropagation());
+
+    // Depth Filter: Slider Event Listener 
+    depthSliderEl.addEventListener('input', () => {
+      const val = parseInt(depthSliderEl.value, 10);
+      updateDepthBubble(val, false); // animate bubble smoothly to the new thumb position
+      applyDepthFilter(val);
+    });
+    depthSliderEl.addEventListener('mousedown', (event) => event.stopPropagation());
 
     // Mouse wheel zoom functionality (center on cursor)
     stage.addEventListener('wheel', (event) => {

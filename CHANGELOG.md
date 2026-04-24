@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.0
+
+  - Improvements: 
+    - Added support for new `Property Access Diagram` diagram type for visualizing the property access chain a file node is involved  
+    - Added support for depth level filtering in the CrossWayAI Viewer to be able to filter out nodes and links which span on higher levels of relationship
+    - Added support for CAST link types, shown with a yellow colour in `Impact Diagram` 
+    - Added hover and pin support for invoke links to show an extra detail tooltip containing the used method signatures 
+  - BugFix:
+    - corrected `CrossWayAI: Dump All DB Definitions` command in multi-project workspace, outputting separate .df files under separate project subfolders of .crosswayai/dump folder
+    - corrected sync of DB access mappings on changed file save event
+    - corrected `Package Diagram` to show the corresponding source directory on main root package
+
 ## 1.7.8
 
 - Bugfix: corrected handling of "inherited-property" link, removed tooltip for "new" links
