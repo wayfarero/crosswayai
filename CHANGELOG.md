@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1
+  - Improvements: 
+    - added support for OE versions starting with 11.7
+  - Bugfix:
+    - fix `Package Diagram` not showing Database access tooltip on file nodes
+    - fix hover event on `run` links to show tooltip information with internal procedures being called and their signatures
+    - corrected logging in crosswayai.log, fixed automatic log cleanup on xref updates
+
+    
 ## 1.8.0
 
   - Improvements: 

@@ -1,6 +1,7 @@
 const {
     generateDiagram,
-    getDsMapArray
+    getDsMapArray,
+    toMermaidNodeId
 } = require('./diagramCommon');
 
 async function generatePackageDiagram(context, uri, deps) {
@@ -103,6 +104,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
         classes.push({
             fileName: node.FileName,
             filePath: node.FilePath || '',
+            nodeId: node.NodeId,
             className,
             classSimpleName,
             packagePath: parentPath
@@ -193,7 +195,6 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     }
 
     const pkgIdByKey = new Map();
-    const clsIdByKey = new Map();
 
     function shortId(prefix, index) {
         return `${prefix}${index.toString(36)}`;
@@ -205,14 +206,6 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
             pkgIdByKey.set(normalizedKey, shortId('p', pkgIdByKey.size));
         }
         return pkgIdByKey.get(normalizedKey);
-    }
-
-    function classNodeId(key) {
-        const normalizedKey = String(key || 'root');
-        if (!clsIdByKey.has(normalizedKey)) {
-            clsIdByKey.set(normalizedKey, shortId('c', clsIdByKey.size));
-        }
-        return clsIdByKey.get(normalizedKey);
     }
 
     function declareNode(id, label, style) {
@@ -286,8 +279,7 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     classes
         .sort((a, b) => a.className.localeCompare(b.className))
         .forEach(cls => {
-            const classKey = `${cls.className}|${cls.fileName || ''}`;
-            const classId = classNodeId(classKey);
+            const classId = toMermaidNodeId(cls.nodeId);
 
             if (cls.filePath) {
                 fileMap[classId] = cls.filePath;

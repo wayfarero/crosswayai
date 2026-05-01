@@ -821,6 +821,11 @@
       return false;
     }
 
+    function isTableRelationsDiagram(markdownPath) {
+      const pathText = String(markdownPath || '');
+      return /[/\\]table_relations_[^/\\]+\.md$/i.test(pathText) || /^table_relations_[^/\\]+\.md$/i.test(pathText);
+    }
+
     function isCrosswayDependencyDiagram(mermaidCode) {
       const source = String(mermaidCode || '');
       if (/^\s*%%CROSSWAY_SOURCE_NODE:/m.test(source)) {
@@ -1399,6 +1404,7 @@
     function filterTooltipCallItems(values) {
       const blocked = new Set([
         'include',
+        'run',
         'inherits',
         'implements',
         'new',
@@ -2382,6 +2388,8 @@
             stage.scrollLeft = Math.max(0, scrollX);
             stage.scrollTop = Math.max(0, scrollY);
           }
+        } else if (isTableRelationsDiagram(markdownPath)) {
+          centerStageScroll();
         }
         if (nodeSearchInput.value.trim()) {
           applySearchHighlights(nodeSearchInput.value.trim());
@@ -2633,6 +2641,8 @@
           stage.scrollLeft = Math.max(0, scrollX);
           stage.scrollTop = Math.max(0, scrollY);
         }
+      } else if (isTableRelationsDiagram(defaultMarkdownPath)) {
+        centerStageScroll();
       }
     });
 

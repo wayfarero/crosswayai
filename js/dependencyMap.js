@@ -28,7 +28,7 @@ async function generateDependencyMap(context, deps) {
     vscode.window.showInformationMessage('CrossWayAI: Generating dependency map...');
 
     const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders, fs, CrossWayAILog);
-    CrossWayAILog.appendLine(`Started generating dependency map for workspace: ${workspaceRoot} ...`);
+    CrossWayAILog.appendLine(`\nStarted generating dependency map for workspace: ${workspaceRoot} ...`);
     CrossWayAILog.show(true);
     
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
@@ -152,7 +152,7 @@ async function generateDependencyMap(context, deps) {
         setAnalysisRunning(false);
     }
 
-    CrossWayAILog.appendLine("Done generating dependency map.");
+    CrossWayAILog.appendLine("Done generating dependency map.\n");
     CrossWayAILog.show(true);
 
     if (failedProjects.length > 0) {
@@ -170,9 +170,10 @@ async function generateDependencyMap(context, deps) {
 }
 
 async function runABLAnalysis(context, workspaceRoot, deps) {
+    // runABLScript will determine oeversion automatically if not provided
+    const { fs, path, CrossWayAILog } = deps;
     const extraArgs = ['-param', JSON.stringify({ workspaceRoot })];
     await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runAnalysis.p', args: extraArgs });
-    const { fs, path, CrossWayAILog } = deps;
     const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
     await cleanupDirectory(tempDir, fs, CrossWayAILog);
 }

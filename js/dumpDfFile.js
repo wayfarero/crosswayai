@@ -94,11 +94,12 @@ async function dumpAllDBDefinitions(context, deps) {
         return;
     }
 
-    CrossWayAILog.appendLine('Starting dumpAllDBDefinitions...');
+    CrossWayAILog.appendLine('\nStarting dumpAllDBDefinitions...');
     CrossWayAILog.show(true);
 
     for (const { root: projectRoot, projectPath } of projectRoots) {
-        CrossWayAILog.appendLine(`\nProcessing project: ${projectRoot}`);
+        CrossWayAILog.appendLine(`>Processing project: ${projectRoot}`);
+        CrossWayAILog.show(true);
         
         let dbConnections;
         try {
@@ -125,7 +126,7 @@ async function dumpAllDBDefinitions(context, deps) {
         for (const dbConn of dbConnections) {
             const dbName = dbConn.name;
             if (dbName) {
-                CrossWayAILog.appendLine(`Calling dumpDfFile for DB: ${dbName}`);
+                CrossWayAILog.appendLine(`>Calling dumpDfFile for DB: ${dbName}`);
                 CrossWayAILog.show(true);
                 await dumpDfFile(context, deps, dbName, workspaceRoot, path.basename(projectRoot), pfFilePath);
             }
@@ -136,7 +137,7 @@ async function dumpAllDBDefinitions(context, deps) {
         await cleanupDirectory(tempDir, fs, CrossWayAILog);
     }
     
-    CrossWayAILog.appendLine('\nCompleted dumpAllDBDefinitions.');
+    CrossWayAILog.appendLine('Completed dumpAllDBDefinitions.\n');
     CrossWayAILog.show(true);
 }
 

@@ -1,3 +1,62 @@
+/**
+ * Determines the oeversion for a specific project root, considering the active profile if present.
+ * @param {string} projectRoot - The root directory of the project
+ * @param {object} fs - Node.js fs module
+ * @param {object} path - Node.js path module
+ * @param {object} CrossWayAILog - Logger
+ * @returns {string|null} oeversion for the project, or null if not found
+ */
+function getProjectOEVersion(projectRoot, fs, path, CrossWayAILog, vscode) {
+    let activeProfile = null;
+    const profilePath = path.join(projectRoot, '.vscode', 'profile.json');
+    if (fs.existsSync(profilePath)) {
+        try {
+            const profileJson = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+            if (profileJson && profileJson.profile) {
+                activeProfile = profileJson.profile;
+            }
+        } catch (e) {}
+    }
+
+    const projectJsonPath = path.join(projectRoot, 'openedge-project.json');
+    if (fs.existsSync(projectJsonPath)) {
+        try {
+            const projectJson = JSON.parse(fs.readFileSync(projectJsonPath, 'utf8'));
+            //try active profile first
+            if (activeProfile && Array.isArray(projectJson.profiles)) {
+                const foundProfile = projectJson.profiles.find(p => p.name === activeProfile);
+                if (foundProfile && foundProfile.value && foundProfile.value.oeversion) {
+                    if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${foundProfile.value.oeversion}' picked up from current profile '${activeProfile}' in ${projectJsonPath}`);
+                    return foundProfile.value.oeversion;
+                }
+            }
+            //then try project level
+            if (projectJson.oeversion) {
+                if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${projectJson.oeversion}' picked up from project configuration in ${projectJsonPath}`);
+                return projectJson.oeversion;
+            }
+        } catch (e) {
+            if (CrossWayAILog) CrossWayAILog.appendLine(`Failed to parse openedge-project.json at ${projectJsonPath}: ` + e.message);
+        }
+    } else {
+        if (CrossWayAILog) CrossWayAILog.appendLine(`>getProjectOEVersion: openedge-project.json not found at ${projectJsonPath}`);
+    }
+
+    //then try workspace default runtime setting
+    if (vscode) {
+        try {
+            const defaultRuntime = vscode.workspace.getConfiguration('abl.configuration').get('defaultRuntime');
+            if (defaultRuntime) {
+                if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${defaultRuntime}' picked up from workspace defaultRuntime`);
+                return defaultRuntime;
+            }
+        } catch (e) {
+            if (CrossWayAILog) CrossWayAILog.appendLine('Failed to read abl.configuration.defaultRuntime: ' + e.message);
+        }
+    }
+
+    throw new Error(`Could not determine oeversion for ${projectRoot}`);
+}
 const path = require('path');
 
 const diagramColors = require('../resources/diagram-colors.json');
@@ -34,7 +93,7 @@ function resolveWorkspaceRoot(workspaceFolders, fsModule, CrossWayAILog) {
                 }
                 const wsFile = files.find(f => f.endsWith('.code-workspace'));
                 if (wsFile) {
-                    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Found .code-workspace in ${dir}`);
+                    if (CrossWayAILog) CrossWayAILog.appendLine(`>resolveWorkspaceRoot: Found .code-workspace in ${dir}`);
                     return dir;
                 }
                 prevDir = dir;
@@ -78,7 +137,7 @@ async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
     try {
         if (fs.existsSync(dirPath)) {
             await fs.promises.rm(dirPath, { recursive: true, force: true });
-            if (CrossWayAILog) CrossWayAILog.appendLine('Cleaned up directory: ' + dirPath);
+            if (CrossWayAILog) CrossWayAILog.appendLine('>Cleaned up directory: ' + dirPath);
         }
     } catch (e) {
         if (CrossWayAILog) CrossWayAILog.appendLine('>Warning: Failed to clean up directory: ' + e.message);
@@ -112,7 +171,35 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
 
     const logFile = path.join(crosswayaiDir, 'crosswayai.log');
     const logStream = fs.createWriteStream(logFile, { flags: 'a' });
-    const extensionAblPath = path.join(context.extensionPath, 'crosswayai.pl');
+
+    // Determine oeversion from deps or by querying the project
+    let oeversion = deps.oeversion;
+    if (!oeversion) {
+        try {
+            oeversion = getProjectOEVersion(workspaceRoot, fs, path, CrossWayAILog, vscode);
+        } catch (e) {
+            CrossWayAILog.appendLine(`>runABLScript: getProjectOEVersion failed: ${e.message}`);
+            vscode.window.showErrorMessage('Could not determine OpenEdge version (oeversion) for the current profile.');
+            return;
+        }
+    }
+    const oeversionSafe = String(oeversion).replace(/\./g, '');
+    const knownOEVersions = deps.knownOEVersions;
+    const plDir = path.join(context.extensionPath, 'resources', 'abl', 'pl');
+    let extensionAblPath = path.join(plDir, `crosswayai_oe${oeversionSafe}.pl`);
+    if (!fs.existsSync(extensionAblPath)) {
+        const majorVersion = String(oeversion).split('.')[0];
+        const fallbackVersion = knownOEVersions.find(version => String(version).split('.')[0] === majorVersion);
+        if (fallbackVersion) {
+            const fallbackVersionSafe = String(fallbackVersion).replace(/\./g, '');
+            const fallbackPLName = `crosswayai_oe${fallbackVersionSafe}.pl`;
+            extensionAblPath = path.join(plDir, fallbackPLName);
+            CrossWayAILog.appendLine(`>oeversion ${oeversion} PL not found, falling back to ${fallbackPLName}`);
+        } else {
+            vscode.window.showErrorMessage(`CrossWayAI: No compatible PL file found for OpenEdge version ${oeversion}.`);
+            return;
+        }
+    }
     const prodictPath = path.join(dlcEnv, 'tty','prodict.pl');
     const adecommPath = path.join(dlcEnv, 'tty','adecomm.pl');
     const runScriptPath = scriptName;
@@ -1151,6 +1238,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     };
 }
 module.exports = {
+    getProjectOEVersion,
     resolveWorkspaceRoot,
     resolveDiagramContext,
     createMermaidGraphWriter,

@@ -21,7 +21,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 
 ## Requirements
 
-- Progress OpenEdge installation.
+- Progress OpenEdge 11.7 - 12.8 installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension (installed automatically with CrossWayAI)
 - Windows support only (for now)
 
@@ -83,6 +83,14 @@ and via context menus:
 ![View Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/viewdiagram.gif)
 
 ## Release Notes
+
+### 1.8.1
+  - Improvements: 
+    - added support for OE versions starting with 11.7
+  - Bugfix:
+    - fix `Package Diagram` not showing Database access tooltip on file nodes
+    - fix hover event on `run` links to show tooltip information with internal procedures being called and their signatures
+    - corrected logging in crosswayai.log, fixed automatic log cleanup on xref updates
 
 ### 1.8.0
   - Improvements: 

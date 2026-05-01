@@ -16,6 +16,8 @@ const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./mermaidviewer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 
+const KNOWN_OE_VERSIONS = ['11.7', '12.8'];
+
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
 const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid } = createMermaidViewer({
@@ -39,14 +41,16 @@ function activate(context) {
         CrossWayAILog,
         openCrosswayAIViewer,
         persistMermaid,
-        getDsMapArray
+        getDsMapArray,
+        knownOEVersions: KNOWN_OE_VERSIONS
     });
 
     const getCommonDeps = () => ({
         vscode,
         fs,
         path,
-        CrossWayAILog
+        CrossWayAILog,
+        knownOEVersions: KNOWN_OE_VERSIONS
     });
 
     const handleDependencyMap = (ctx) => generateDependencyMap(ctx, getCommonDeps());

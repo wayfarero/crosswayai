@@ -101,7 +101,7 @@ async function processChangedXrefs(context, workspaceRoot, dsMapPath, changedXre
         const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
         await cleanupDirectory(tempDir, fs, CrossWayAILog);
 
-        CrossWayAILog.appendLine('Incremental analysis complete.');
+        CrossWayAILog.appendLine('Incremental analysis complete.\n');
         CrossWayAILog.show(true);
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental analysis error: ${error.message}`);
