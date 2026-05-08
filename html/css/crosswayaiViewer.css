@@ -1,0 +1,85 @@
+﻿@import "legend.css";
+@import "nodeSearch.css";
+@import "tooltip.css";
+@import "depthFilter.css";
+@import "zoom.css";
+@import "nodeContextMenu.css";
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --panel2: #1f2937;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+    .viewer {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #020617;
+      overflow: hidden;
+    }
+    #diagram {
+      width: max-content;
+      height: max-content;
+      min-width: 100%;
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    #diagram svg g.node,
+    #diagram svg .node,
+    #diagram svg .node * {
+      cursor: pointer;
+      user-select: none;
+    }
+    button {
+      border: 1px solid #4b5563;
+      background: var(--panel2);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { filter: brightness(1.12); }
+    .overlay {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+      max-width: calc(100vw - 20px);
+      background: rgba(3,7,18,0.6);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 6px;
+      backdrop-filter: blur(4px);
+    }
+    #status {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      background: rgba(3,7,18,0.6);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      max-width: calc(100vw - 240px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+@import "nodeSearch.css";

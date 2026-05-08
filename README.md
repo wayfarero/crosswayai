@@ -84,6 +84,13 @@ and via context menus:
 
 ## Release Notes
 
+### 1.8.2
+  - Improvements: 
+    - refactored CrossWayAI Viewer code for better maintainability
+  - Bugfix:
+    - corrected support for OE versions starting with 11.7 
+
+
 ### 1.8.1
   - Improvements: 
     - added support for OE versions starting with 11.7

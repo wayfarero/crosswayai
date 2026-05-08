@@ -126,6 +126,30 @@ function resolveWorkspaceRoot(workspaceFolders, fsModule, CrossWayAILog) {
     return path.dirname(firstFolderPath);
 }
 
+function resolveProjectRootFromName(workspace, projectName, path, workspaceRoot) {
+    const trimmedProjectName = String(projectName || '').trim();
+    if (!trimmedProjectName) {
+        return workspaceRoot || null;
+    }
+
+    const folders = (workspace && Array.isArray(workspace.workspaceFolders)) ? workspace.workspaceFolders : [];
+    const matchingFolder = folders.find(folder => {
+        const folderPath = folder && folder.uri ? folder.uri.fsPath : '';
+        if (!folderPath) {
+            return false;
+        }
+
+        const folderName = folder.name || path.basename(folderPath);
+        return folderName === trimmedProjectName || path.basename(folderPath) === trimmedProjectName;
+    });
+
+    if (matchingFolder && matchingFolder.uri && matchingFolder.uri.fsPath) {
+        return matchingFolder.uri.fsPath;
+    }
+
+    return workspaceRoot ? path.join(workspaceRoot, trimmedProjectName) : null;
+}
+
 /**
  * Utility to recursively remove a directory if it exists.
  * @param {string} dirPath - Directory path to remove.
@@ -144,6 +168,21 @@ async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
     }
 }
 
+function getRuntimeDLC(oeversion, vscode, CrossWayAILog) {
+    try {
+        const runtimes = vscode.workspace.getConfiguration('abl.configuration').get('runtimes') || [];
+        const runtimeEntry = runtimes.find(r => r.name === String(oeversion));
+        const runtimePath = runtimeEntry && runtimeEntry.path;
+        if (runtimePath) {
+            if (CrossWayAILog) CrossWayAILog.appendLine(`>getRuntimeDLC: resolved runtime path '${runtimePath}' for oeversion '${oeversion}'`);
+        }
+        return runtimePath || null;
+    } catch (e) {
+        if (CrossWayAILog) CrossWayAILog.appendLine(`>getRuntimeDLC: failed to read runtimes: ${e.message}`);
+        return null;
+    }
+}
+
 /**
  * Runs an ABL script using the provided parameters.
  * @param {Object} options - Options for running the ABL script.
@@ -157,11 +196,6 @@ async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
  */
 async function runABLScript({ context, workspaceRoot, deps, scriptName, args: extraArgs = []}) {
     const { vscode, fs, path, CrossWayAILog } = deps;
-    const dlcEnv = process.env.DLC || process.env.dlc;
-    if (!dlcEnv) {
-        vscode.window.showErrorMessage('Environment variable DLC is not set. Please set %DLC% to your OpenEdge installation path and restart VS Code.');
-        return;
-    }
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
     const crosswayaiTempDir = path.join(crosswayaiDir, 'temp');
 
@@ -172,19 +206,26 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
     const logFile = path.join(crosswayaiDir, 'crosswayai.log');
     const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-    // Determine oeversion from deps or by querying the project
+    // Determine oeversion from deps, otherwise fallback to workspace default runtime.
     let oeversion = deps.oeversion;
     if (!oeversion) {
         try {
-            oeversion = getProjectOEVersion(workspaceRoot, fs, path, CrossWayAILog, vscode);
+            const defaultRuntime = vscode.workspace.getConfiguration('abl.configuration').get('defaultRuntime');
+            if (defaultRuntime) {
+                oeversion = defaultRuntime;
+                CrossWayAILog.appendLine(`>oeversion '${defaultRuntime}' picked up from workspace defaultRuntime`);
+            }
         } catch (e) {
-            CrossWayAILog.appendLine(`>runABLScript: getProjectOEVersion failed: ${e.message}`);
-            vscode.window.showErrorMessage('Could not determine OpenEdge version (oeversion) for the current profile.');
+            CrossWayAILog.appendLine(`>runABLScript: failed to read defaultRuntime: ${e.message}`);
+        }
+
+        if (!oeversion) {
+            vscode.window.showErrorMessage('Could not determine OpenEdge version (oeversion). Set abl.configuration.defaultRuntime or provide oeversion in openedge-project.json.');
             return;
         }
     }
     const oeversionSafe = String(oeversion).replace(/\./g, '');
-    const knownOEVersions = deps.knownOEVersions;
+    const knownOEVersions = Array.isArray(deps.knownOEVersions) ? deps.knownOEVersions : [];
     const plDir = path.join(context.extensionPath, 'resources', 'abl', 'pl');
     let extensionAblPath = path.join(plDir, `crosswayai_oe${oeversionSafe}.pl`);
     if (!fs.existsSync(extensionAblPath)) {
@@ -200,11 +241,16 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
             return;
         }
     }
-    const prodictPath = path.join(dlcEnv, 'tty','prodict.pl');
-    const adecommPath = path.join(dlcEnv, 'tty','adecomm.pl');
+    const runtimeDLC = getRuntimeDLC(oeversion, vscode, CrossWayAILog);
+    if (!runtimeDLC) {
+        vscode.window.showErrorMessage(`CrossWayAI: No runtime path configured for OpenEdge version ${oeversion}. Please configure abl.configuration.runtimes in your settings.`);
+        return;
+    }
+    const prodictPath = path.join(runtimeDLC, 'tty','prodict.pl');
+    const adecommPath = path.join(runtimeDLC, 'tty','adecomm.pl');
     const runScriptPath = scriptName;
     const effectivePropath = `${extensionAblPath},${context.extensionPath},${prodictPath},${adecommPath}`;
-    const executable = path.join(dlcEnv, 'bin', '_progres');
+    const executable = path.join(runtimeDLC, 'bin', '_progres');
     const args = [
         '-b',
         '-p',
@@ -961,7 +1007,6 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
 function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     
     let edgeCounter = 0;
-    const MAX_EDGE_LABEL_LENGTH = 120;
 
     const NODE_BORDER_COLORS = diagramColors.nodeBorderColors;
 
@@ -1203,9 +1248,6 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         const color = resolveEdgeColor(edgeLinkType || relationType || label);
 
         let safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
-        if (safeLabel.length > MAX_EDGE_LABEL_LENGTH) {
-            safeLabel = `${safeLabel.slice(0, MAX_EDGE_LABEL_LENGTH - 1)}...`;
-        }
 
         if (safeLabel) {
             mermaidGraph += `    ${sourceId} -->|${safeLabel}| ${destId};\n`;
@@ -1239,7 +1281,9 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 }
 module.exports = {
     getProjectOEVersion,
+    getRuntimeDLC,
     resolveWorkspaceRoot,
+    resolveProjectRootFromName,
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,

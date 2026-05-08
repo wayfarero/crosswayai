@@ -13,7 +13,7 @@ const { generatePackageDiagram } = require('./packageDiagram');
 const { generateInstanceChainDiagram } = require('./instanceChainDiagram');
 const { generatePropertyAccessDiagram } = require('./propertyAccessDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
-const { createMermaidViewer } = require('./mermaidviewer');
+const { createMermaidViewer } = require('./crosswayaiContainer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 
 const KNOWN_OE_VERSIONS = ['11.7', '12.8'];

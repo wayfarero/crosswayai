@@ -1,0 +1,41 @@
+    #nodeContextMenu {
+      position: fixed;
+      z-index: 40;
+      min-width: 160px;
+      background: rgba(3, 7, 18, 0.97);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 4px 0;
+      font-size: 13px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(6px);
+    }
+
+    #nodeContextMenu[hidden] {
+      display: none;
+    }
+
+    #nodeContextMenu .ctx-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    #nodeContextMenu .ctx-item:hover {
+      background: rgba(59, 130, 246, 0.25);
+    }
+
+    #nodeContextMenu .ctx-item .ctx-icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }

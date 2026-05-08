@@ -1,4 +1,4 @@
-const { runABLScript, cleanupDirectory, resolveWorkspaceRoot } = require('./diagramCommon');
+const { runABLScript, cleanupDirectory, resolveWorkspaceRoot, getProjectOEVersion, resolveProjectRootFromName } = require('./diagramCommon');
 
 /**
  * Resolves relative paths in a connect string to absolute paths.
@@ -26,6 +26,21 @@ function resolveConnectString(connectString, workspaceRoot, path) {
 }
 
 /**
+ * Returns true only for connect strings that use -db without -H and -S.
+ * @param {string} connectString
+ * @returns {boolean}
+ */
+function shouldResolveConnectString(connectString) {
+    if (!connectString) {
+        return false;
+    }
+
+    const hasDb = /(?:^|\s)-db(?:\s|$)/i.test(connectString);
+    const hasHostOrService = /(?:^|\s)-(?:H|S)(?:\s|$)/i.test(connectString);
+    return hasDb && !hasHostOrService;
+}
+
+/**
  * Calls the dumpDfFile.p ABL script to dump the definition of a database file.
  * @param {object} context extension context object
  * @param {object} deps dependency injection object containing VS Code API, Node.js fs & path, and logging utilities 
@@ -36,10 +51,16 @@ function resolveConnectString(connectString, workspaceRoot, path) {
  * @returns 
  */
 async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfFilePath) {
+    const { vscode, fs, path, CrossWayAILog } = deps;
+
     // If projectName is not provided, use the workspace Root folder name as the project name
     if (!projectName || projectName.trim() === "") {
         projectName = path.basename(workspaceRoot);
     }
+
+    const projectRoot = resolveProjectRootFromName(vscode.workspace, projectName, path, workspaceRoot) || workspaceRoot;
+    const oeversion = getProjectOEVersion(projectRoot, fs, path, CrossWayAILog, vscode);
+
     // Pass param and parameterFile as extra arguments
     const extraArgs = ['-param', JSON.stringify({ dbName, workspaceRoot, projectName })];
     
@@ -49,7 +70,7 @@ async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfF
     return runABLScript({
         context,
         workspaceRoot,
-        deps,
+        deps: { ...deps, oeversion },
         scriptName: 'core/dumpDfFile.p',
         args: extraArgs
     });
@@ -119,8 +140,14 @@ async function dumpAllDBDefinitions(context, deps) {
         }
 
         const pfFilePath = path.join(workspaceRoot, `.crosswayai/temp/dbConn.pf`);
-        const connectValues = dbConnections.map(dbConn => resolveConnectString(dbConn.connect, projectRoot, path))
-                                           .filter(Boolean);
+        const connectValues = dbConnections
+            .map(dbConn => {
+                const connectString = dbConn && dbConn.connect;
+                return shouldResolveConnectString(connectString)
+                    ? resolveConnectString(connectString, projectRoot, path)
+                    : connectString;
+            })
+            .filter(Boolean);
         await preparePfFile(connectValues, pfFilePath, fs);
 
         for (const dbConn of dbConnections) {

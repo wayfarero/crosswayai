@@ -144,7 +144,7 @@ async function generateDependencyMap(context, deps) {
     CrossWayAILog.show(true);
     try {
         setAnalysisRunning(true);
-        await runABLAnalysis(context, workspaceRoot, { vscode, fs, path, CrossWayAILog });
+        await runABLAnalysis(context, workspaceRoot, deps);
     } catch (error) {
         CrossWayAILog.appendLine(`**Error during ABL analysis: ${error.message}`);
         CrossWayAILog.show(true);

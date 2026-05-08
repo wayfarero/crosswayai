@@ -1,0 +1,52 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CrossWAI Mermaid Viewer</title>
+  <link rel="stylesheet" href="css/crosswayaiViewer.css" />
+</head>
+<body>
+  <section class="viewer">
+    <div id="stage">
+      <div id="diagram"></div>
+    </div>
+    <div class="overlay">
+      <div class="search-box">
+        <input id="nodeSearch" type="text" placeholder="Search nodes..." autocomplete="off" spellcheck="false" />
+        <span id="searchCount"></span>
+      </div>
+      <div class="depth-filter" id="depthFilterControl" style="display:none;">
+        <span class="depth-filter-label">Depth:</span>
+        <div class="depth-slider-wrapper">
+          <input id="depthSlider" type="range" min="0" max="1" value="1" step="1" />
+          <div id="depthBubble">1</div>
+        </div>
+      </div>
+      <button id="exportPng">Export Image</button>
+      <button id="zoomIn">+</button>
+      <button id="zoomOut">-</button>
+      <button id="fit">Fit</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div id="status">Ready.</div>
+    <div id="legend" hidden></div>
+    <div id="edgeTooltip" hidden></div>
+    <div id="edgeTooltipDetail" hidden></div>
+    <div id="nodeContextMenu" hidden></div>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="js/depthFilter.js"></script>
+  <script src="js/tooltip.js"></script>
+  <script src="js/legend.js"></script>
+  <script src="js/zoom.js"></script>
+  <script src="js/pan.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/nodeContextMenu.js"></script>
+  <script src="js/entityRelations.js"></script>
+  <script src="js/crosswayaiViewer.js"></script>
+  <script src="js/nodeSearch.js"></script>
+</body>
+</html>
+

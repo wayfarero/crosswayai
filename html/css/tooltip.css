@@ -1,0 +1,75 @@
+﻿    #edgeTooltip {
+      position: fixed;
+      z-index: 30;
+      max-width: min(420px, calc(100vw - 20px));
+      background: rgba(3, 7, 18, 0.95);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      pointer-events: auto;
+      white-space: normal;
+    }
+    #edgeTooltip[hidden] {
+      display: none;
+    }
+    #edgeTooltip ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+    #edgeTooltip li {
+      margin: 2px 0;
+    }
+    #edgeTooltip li.param-line {
+      padding-left: 12px;
+    }
+    #edgeTooltip li.param-line::marker {
+      margin-left: 12px;
+    }
+    #edgeTooltip li.active-method {
+      font-weight: 700;
+    }
+    #edgeTooltipDetail {
+      position: fixed;
+      z-index: 31;
+      max-width: min(420px, calc(100vw - 20px));
+      background: rgba(3, 7, 18, 0.95);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      pointer-events: auto;
+      white-space: normal;
+    }
+    #edgeTooltipDetail[hidden] {
+      display: none;
+    }
+    #edgeTooltipDetail .detail-title {
+      font-weight: 600;
+      margin-bottom: 0;
+      color: #f3f4f6;
+    }
+    #edgeTooltipDetail ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+    #edgeTooltip .tooltip-title {
+      margin-bottom: 8px;
+      color: #f9fafb;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    #edgeTooltip .db-group + .db-group {
+      margin-top: 8px;
+    }
+    #edgeTooltip .db-name {
+      margin-bottom: 4px;
+      color: #ffffff;
+      font-weight: 700;
+    }
