@@ -15,18 +15,58 @@ const { generatePropertyAccessDiagram } = require('./propertyAccessDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./crosswayaiContainer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
+const { getWorkspaceRoot } = require('./diagramCommon');
+const { openXrefFile } = require('./fileHandling');
+const { setCrossWayAILog } = require('./crosswayaiLogger');
 
 const KNOWN_OE_VERSIONS = ['11.7', '12.8'];
 
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
-const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid } = createMermaidViewer({
-    vscode,
-    fs,
-    path,
+setCrossWayAILog(CrossWayAILog);
+const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible } = createMermaidViewer({
     http,
-    CrossWayAILog
 });
+
+let activeGeneratedDiagram = null;
+
+/**
+ * Ensures the default extension settings file exists.
+ * Copies the template from resources if .crosswayai/crosswayai_settings.json does not exist.
+ * @param {vscode.ExtensionContext} context
+ */
+function ensureDefaultExtensionSettings(context) {
+    try {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+            return;
+        }
+
+        const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
+        const settingsPath = path.join(crosswayaiDir, 'crosswayai_settings.json');
+
+        // If settings file already exists, do nothing
+        if (fs.existsSync(settingsPath)) {
+            return;
+        }
+
+        // Create .crosswayai directory if it doesn't exist
+        if (!fs.existsSync(crosswayaiDir)) {
+            fs.mkdirSync(crosswayaiDir, { recursive: true });
+        }
+
+        // Copy default settings from resources
+        const defaultSettingsPath = path.join(context.extensionPath, 'resources', 'crosswayai_settings.json');
+        if (fs.existsSync(defaultSettingsPath)) {
+            fs.copyFileSync(defaultSettingsPath, settingsPath);
+            CrossWayAILog.appendLine(`Created default settings file at ${settingsPath}`);
+        } else {
+            CrossWayAILog.appendLine(`Warning: Default settings template not found at ${defaultSettingsPath}`);
+        }
+    } catch (error) {
+        CrossWayAILog.appendLine(`Warning: Failed to ensure default settings file: ${error.message}`);
+    }
+}
 
 /**
  * @param {vscode.ExtensionContext} context
@@ -34,11 +74,27 @@ const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid } = create
 function activate(context) {
     CrossWayAILog.appendLine("CrossWayAI extension is now active!");
 
+    // Ensure default settings file exists
+    ensureDefaultExtensionSettings(context);
+
+    async function refreshActiveMermaidDiagram() {
+        if (!activeGeneratedDiagram) {
+            return;
+        }
+
+        if (!isMermaidViewerVisible()) {
+            return;
+        }
+
+        try {
+            CrossWayAILog.appendLine('Regenerating active Mermaid diagram after xref update.');
+            await activeGeneratedDiagram.handler(context, activeGeneratedDiagram.uri);
+        } catch (error) {
+            CrossWayAILog.appendLine(`Failed to regenerate active Mermaid diagram after xref update: ${error.message}`);
+        }
+    }
+
     const getDiagramDeps = () => ({
-        vscode,
-        fs,
-        path,
-        CrossWayAILog,
         openCrosswayAIViewer,
         persistMermaid,
         getDsMapArray,
@@ -46,10 +102,7 @@ function activate(context) {
     });
 
     const getCommonDeps = () => ({
-        vscode,
-        fs,
-        path,
-        CrossWayAILog,
+        refreshActiveMermaidDiagram,
         knownOEVersions: KNOWN_OE_VERSIONS
     });
 
@@ -65,21 +118,23 @@ function activate(context) {
     const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri, getCommonDeps());
     const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getCommonDeps(), dbName, workspaceRoot, pfFilePath);
     const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getCommonDeps());
+    const handleOpenXrefFile = (ctx, uri) => openXrefFile(ctx, uri);
 
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
-        { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram },
-        { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram },
-        { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram },
-        { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram },
-        { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram },
+        { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram, trackDiagram: true },
         { name: 'crosswayai.openCrosswayAIViewer', handler: openCrosswayAIViewer },
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
         { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram },
-        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram },
-        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram },
-        { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram }
+        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram, trackDiagram: true },
+        { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram, trackDiagram: true },
+        { name: 'crosswayai.openXrefFile', handler: handleOpenXrefFile }
     ];
 
     setupXrefWatcher(context, getCommonDeps());
@@ -87,7 +142,18 @@ function activate(context) {
     commands.forEach(command => {
         let disposableCommand;
         if (command.handler) {
-            disposableCommand = vscode.commands.registerCommand(command.name, (uri) => command.handler(context, uri));
+            disposableCommand = vscode.commands.registerCommand(command.name, async (uri) => {
+                ensureDefaultExtensionSettings(context);
+                const sourceUri = command.trackDiagram
+                    ? (uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri))
+                    : null;
+
+                await command.handler(context, uri);
+
+                if (sourceUri && sourceUri.fsPath) {
+                    activeGeneratedDiagram = { handler: command.handler, uri: sourceUri };
+                }
+            });
         } else {
             disposableCommand = vscode.commands.registerCommand(command.name, () => {
                 vscode.window.showInformationMessage(command.message);

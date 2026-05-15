@@ -42,6 +42,10 @@
         centerStageScroll();
       }
       setStatus(`Rendered at ${Math.round(currentZoom * 100)}% zoom.`);
+
+      if (typeof window.CROSSWAY_ON_VIEWPORT_CHANGED === 'function') {
+        window.CROSSWAY_ON_VIEWPORT_CHANGED();
+      }
     }
 
     function fitDiagramToViewport() {

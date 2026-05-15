@@ -32,13 +32,18 @@
     <div id="status">Ready.</div>
     <div id="legend" hidden></div>
     <div id="edgeTooltip" hidden></div>
+    <div id="nodeTooltip" hidden></div>
     <div id="edgeTooltipDetail" hidden></div>
     <div id="nodeContextMenu" hidden></div>
+    <button id="nodeSummaryButton" type="button" hidden aria-label="Generate AI node summary">✨</button>
+    <div id="nodeSummaryPopover" hidden></div>
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="js/depthFilter.js"></script>
-  <script src="js/tooltip.js"></script>
+  <script src="js/edgeTooltip.js"></script>
+  <script src="js/nodeTooltip.js"></script>
+  <script src="js/nodeSummary.js"></script>
   <script src="js/legend.js"></script>
   <script src="js/zoom.js"></script>
   <script src="js/pan.js"></script>

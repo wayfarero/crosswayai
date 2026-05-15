@@ -1,6 +1,6 @@
     #nodeContextMenu {
       position: fixed;
-      z-index: 40;
+      z-index: 60;
       min-width: 160px;
       background: rgba(3, 7, 18, 0.97);
       border: 1px solid #374151;

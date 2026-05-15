@@ -1,4 +1,8 @@
-const { runABLScript, resolveWorkspaceRoot, cleanupDirectory } = require('./diagramCommon');
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const { runABLScript, getWorkspaceRoot, getDsMapPath, cleanupDirectory } = require('./diagramCommon');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 let isAnalysisRunning = false;
 
@@ -11,12 +15,12 @@ function getAnalysisRunning() {
 }
 
 function setupXrefWatcher(context, deps) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
-    const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders, fs, CrossWayAILog);
+    const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) return;
 
-    const dsMapPath = path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
+    const dsMapPath = getDsMapPath(workspaceRoot);
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/.builder/**/*.xref');
     let changedXrefs = new Set();
@@ -46,8 +50,6 @@ function setupXrefWatcher(context, deps) {
 }
 
 function mapXrefToSourceFile(xrefPath, dsMapPath, deps) {
-    const { fs, path } = deps;
-
     if (!fs.existsSync(dsMapPath)) return null;
 
     const builderMatch = xrefPath.match(/^(.+?)[\\\/]\.builder[\\\/]\.pct\d+[\\\/](.+)\.xref$/i);
@@ -72,7 +74,7 @@ function mapXrefToSourceFile(xrefPath, dsMapPath, deps) {
 }
 
 async function processChangedXrefs(context, workspaceRoot, dsMapPath, changedXrefs, deps) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
     if (!fs.existsSync(dsMapPath)) {
         CrossWayAILog.appendLine('Incremental update skipped: dsMap.json not found. Run full analysis first.');
@@ -99,9 +101,12 @@ async function processChangedXrefs(context, workspaceRoot, dsMapPath, changedXre
         await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runIncrementalAnalysis.p', args: extraArgs });
 
         const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
-        await cleanupDirectory(tempDir, fs, CrossWayAILog);
+        await cleanupDirectory(tempDir);
 
         CrossWayAILog.appendLine('Incremental analysis complete.\n');
+        if (typeof deps.refreshActiveMermaidDiagram === 'function') {
+            await deps.refreshActiveMermaidDiagram(context);
+        }
         CrossWayAILog.show(true);
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental analysis error: ${error.message}`);

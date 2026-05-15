@@ -1,33 +1,43 @@
-const { runABLScript, resolveWorkspaceRoot, cleanupDirectory } = require('./diagramCommon');
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const { runABLScript, getWorkspaceRoot, getDsMapPath, getDsMapJsonObject, cleanupDirectory } = require('./diagramCommon');
 const { setAnalysisRunning } = require('./xrefWatcher');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
-function getProjectNameForFolder(folder, path) {
+function getProjectNameForFolder(folder) {
     return folder.name || path.basename(folder.uri.fsPath);
 }
 
-function getDsMapFileCount(dsMapPath, fs) {
-    if (!fs.existsSync(dsMapPath)) {
-        return 0;
-    }
+function getDsMapFileCount(deps) {
+    const CrossWayAILog = getCrossWayAILog();
+
     try {
-        const data = JSON.parse(fs.readFileSync(dsMapPath, 'utf8'));
-        return (data.dsMap && data.dsMap.ttFile) ? data.dsMap.ttFile.length : 0;
+        const dsMapJson = getDsMapJsonObject(true);
+        if (!dsMapJson) {
+            return 0;
+        }
+        return (dsMapJson.dsMap && dsMapJson.dsMap.ttFile) ? dsMapJson.dsMap.ttFile.length : 0;
     } catch (e) {
         return 0;
     }
 }
 
-function normalizeSourcePathForWorkspace(absolutePath, workspaceRoot, path) {
+function normalizeSourcePathForWorkspace(absolutePath, workspaceRoot) {
     const relative = path.relative(workspaceRoot, absolutePath);
     return relative || '.';
 }
 
 async function generateDependencyMap(context, deps) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
     vscode.window.showInformationMessage('CrossWayAI: Generating dependency map...');
 
-    const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders, fs, CrossWayAILog);
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+        return;
+    }
+
     CrossWayAILog.appendLine(`\nStarted generating dependency map for workspace: ${workspaceRoot} ...`);
     CrossWayAILog.show(true);
     
@@ -48,18 +58,11 @@ async function generateDependencyMap(context, deps) {
     CrossWayAILog.appendLine(">dlc: " + dlcEnv);
     CrossWayAILog.show(true);
 
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        CrossWayAILog.appendLine("**No workspace folder found. Please open a workspace.");
-        CrossWayAILog.show(true);
-        vscode.window.showErrorMessage('CrossWayAI: No workspace folder found. Please open a workspace.');
-        return;
-    }
-
     const projectResults = [];
 
     const workspaceSourcePathMap = new Map();
-    
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+
     for (const folder of workspaceFolders) {
         const projectRoot = folder.uri.fsPath;
         
@@ -68,7 +71,7 @@ async function generateDependencyMap(context, deps) {
             continue;
         }
 
-        const projectCfg = loadOpenEdgeProjectConfig(folder, { vscode, fs, path, CrossWayAILog });
+        const projectCfg = loadOpenEdgeProjectConfig(folder);
         const sourcePaths = (projectCfg.buildPath || [])
             .filter(p => p.type === 'source' && p.path)
             .map(p => p.path);
@@ -78,14 +81,14 @@ async function generateDependencyMap(context, deps) {
     }
 
           
-    const dsMapPath = path.join(crosswayaiDir, 'dsMap.json');
+    const dsMapPath = getDsMapPath(workspaceRoot);
     if (fs.existsSync(dsMapPath)) {
         fs.unlinkSync(dsMapPath);
     }
     
     for (const folder of workspaceFolders) {
         const projectRoot = folder.uri.fsPath;
-        const projectName = getProjectNameForFolder(folder, path);
+        const projectName = getProjectNameForFolder(folder);
         const projectSubPath = path.relative(workspaceRoot, projectRoot) || '';
 
 
@@ -101,9 +104,9 @@ async function generateDependencyMap(context, deps) {
             CrossWayAILog.appendLine(`>projectName (${projectName}), projectSubPath (${projectSubPath}), sourcePaths: ${sourcePaths}`);
             CrossWayAILog.show(true);
 
-            const dsMap = await findSourceFiles(projectRoot, sourcePaths, { vscode, fs, path, CrossWayAILog }, projectSubPath);
+            const dsMap = await findSourceFiles(projectRoot, sourcePaths, projectSubPath);
 
-            const prevCount = getDsMapFileCount(dsMapPath, fs);
+            const prevCount = getDsMapFileCount();
 
             // Append to existing dsMap.json if it exists from a previous iteration
             if (fs.existsSync(dsMapPath)) {
@@ -116,7 +119,7 @@ async function generateDependencyMap(context, deps) {
             }
             fs.writeFileSync(dsMapPath, JSON.stringify(dsMap, null, 2));
 
-            const totalCount = getDsMapFileCount(dsMapPath, fs);
+            const totalCount = getDsMapFileCount();
             const deltaCount = totalCount - prevCount;
             projectResults.push({ projectName, projectRoot, fileCount: deltaCount, success: true });
             CrossWayAILog.appendLine(`>Found ${deltaCount} files for ${projectName} (total: ${totalCount}).`);
@@ -171,19 +174,18 @@ async function generateDependencyMap(context, deps) {
 
 async function runABLAnalysis(context, workspaceRoot, deps) {
     // runABLScript will determine oeversion automatically if not provided
-    const { fs, path, CrossWayAILog } = deps;
     const extraArgs = ['-param', JSON.stringify({ workspaceRoot })];
     await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runAnalysis.p', args: extraArgs });
     const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
-    await cleanupDirectory(tempDir, fs, CrossWayAILog);
+    await cleanupDirectory(tempDir);
 }
 
 
 function loadOpenEdgeProjectConfig(folder, deps) {
     
     const projectRoot = folder.uri.fsPath;
-    const { vscode, fs, path, CrossWayAILog } = deps;
-    const projectName = getProjectNameForFolder(folder, path);
+    const CrossWayAILog = getCrossWayAILog();
+    const projectName = getProjectNameForFolder(folder);
     let cfg = {};
     
     const openedgeProjectJsonPath = path.join(projectRoot, 'openedge-project.json');
@@ -202,8 +204,8 @@ function loadOpenEdgeProjectConfig(folder, deps) {
     return cfg;
 }
 
-async function findSourceFiles(projectRoot, sourcePaths = [], deps, projectName) {
-    const { fs, path, CrossWayAILog } = deps;
+async function findSourceFiles(projectRoot, sourcePaths = [], projectName) {
+    const CrossWayAILog = getCrossWayAILog();
     const sourceExtensions = ['.p', '.w', '.cls', '.i'];
     const ttFile = [];
 
@@ -218,7 +220,7 @@ async function findSourceFiles(projectRoot, sourcePaths = [], deps, projectName)
             continue;
         }
 
-        const source = normalizeSourcePathForWorkspace(sourceDir, projectRoot, path);
+        const source = normalizeSourcePathForWorkspace(sourceDir, projectRoot);
         const normalizedSource = (source === '.') ? '' : source;
 
         const queue = [{ fsPath: sourceDir, rawPath: sourceDir }];

@@ -16,7 +16,92 @@
 
     const params = new URLSearchParams(window.location.search);
     const mermaidMarkdownFilePath = params.get('file');
+    const initialViewportStateParam = params.get('viewport');
     let LINK_TYPE_COLORS = {};
+    let suppressViewportStateBroadcast = false;
+    let viewportBroadcastTimer = null;
+
+    function parseInitialViewportState(value) {
+      if (!value) {
+        return null;
+      }
+
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object') {
+          return null;
+        }
+
+        const zoom = Number(parsed.zoom);
+        const scrollLeft = Number(parsed.scrollLeft);
+        const scrollTop = Number(parsed.scrollTop);
+        if (!Number.isFinite(zoom) || !Number.isFinite(scrollLeft) || !Number.isFinite(scrollTop)) {
+          return null;
+        }
+
+        return {
+          zoom: Math.min(10, Math.max(0.1, zoom)),
+          scrollLeft: Math.max(0, scrollLeft),
+          scrollTop: Math.max(0, scrollTop)
+        };
+      } catch (_) {
+        return null;
+      }
+    }
+
+    const initialViewportState = parseInitialViewportState(initialViewportStateParam);
+
+    function postViewportState() {
+      if (suppressViewportStateBroadcast) {
+        return;
+      }
+
+      const state = {
+        zoom: Number(currentZoom || 1),
+        scrollLeft: Number(stage.scrollLeft || 0),
+        scrollTop: Number(stage.scrollTop || 0),
+        markdownPath: mermaidMarkdownFilePath || null
+      };
+
+      window.parent.postMessage({ type: 'viewerViewportState', viewport: state }, '*');
+    }
+
+    function scheduleViewportStateBroadcast() {
+      if (suppressViewportStateBroadcast) {
+        return;
+      }
+
+      if (viewportBroadcastTimer) {
+        clearTimeout(viewportBroadcastTimer);
+      }
+
+      viewportBroadcastTimer = window.setTimeout(() => {
+        viewportBroadcastTimer = null;
+        postViewportState();
+      }, 80);
+    }
+
+    window.CROSSWAY_ON_VIEWPORT_CHANGED = scheduleViewportStateBroadcast;
+
+    function applyInitialViewportState() {
+      if (!initialViewportState) {
+        return false;
+      }
+
+      suppressViewportStateBroadcast = true;
+      try {
+        applyZoom(initialViewportState.zoom, false);
+
+        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        stage.scrollLeft = Math.min(initialViewportState.scrollLeft, maxScrollLeft);
+        stage.scrollTop = Math.min(initialViewportState.scrollTop, maxScrollTop);
+      } finally {
+        suppressViewportStateBroadcast = false;
+      }
+
+      return true;
+    }
 
     async function loadDiagramColors() {
       try {
@@ -51,6 +136,23 @@
       return matchesMarkdownDiagramPath(markdownPath, 'table_relations');
     }
 
+    function getNodeIdentity(nodeEl) {
+      if (!nodeEl) return null;
+      const dataId = nodeEl.getAttribute('data-id');
+      if (dataId) return dataId;
+
+      const className = nodeEl.getAttribute('class') || '';
+      const classMatch = className.match(/\bid-([A-Za-z0-9_]+)\b/);
+      if (classMatch) return classMatch[1];
+
+      const id = nodeEl.id || '';
+      const flowMatch = id.match(/(?:flowchart|graph)-([A-Za-z0-9_]+)-\d+$/i);
+      if (flowMatch) return flowMatch[1];
+
+      const fallbackLabel = nodeEl.querySelector('text')?.textContent?.trim();
+      return fallbackLabel || null;
+    }
+
     function activateDiagramSizing() {
       const svg = diagram.querySelector('svg');
       if (!svg) return;
@@ -69,6 +171,7 @@
       let activeSelection = null;
       let lockedNode = null;
       let pendingNodeClickTimer = null;
+      let pinnedNodeTooltipAnchor = null;
       clearAllPinnedEdgeTooltips();
 
       function openNodeFile(nodeId) {
@@ -78,6 +181,16 @@
         }
 
         window.parent.postMessage({ type: 'openFile', filePath: filePath }, '*');
+        return true;
+      }
+
+      function openNodeXrefFile(nodeId) {
+        const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
+        if (!filePath) {
+          return false;
+        }
+
+        window.parent.postMessage({ type: 'openXrefFile', filePath: filePath }, '*');
         return true;
       }
 
@@ -151,6 +264,33 @@
           originalStyleStroke,
           originalStyleStrokeWidth
         };
+      }
+
+      function clearPinnedEdgeTooltipState() {
+        window.CROSSWAY_EDGE_TOOLTIP_PINNED = false;
+        clearPinnedEdgeDetail();
+      }
+
+      function clearPinnedNodeTooltipState() {
+        clearPinnedNodeTooltip();
+        pinnedNodeTooltipAnchor = null;
+      }
+
+      function clearPinnedTooltipState() {
+        clearPinnedEdgeTooltipState();
+        clearPinnedNodeTooltipState();
+      }
+
+      function pinCurrentNodeTooltip(anchorNode) {
+        window.CROSSWAY_NODE_TOOLTIP_PINNED = true;
+        pinnedNodeTooltipAnchor = anchorNode;
+      }
+
+      function refreshPinnedNodeTooltipAnchor() {
+        if (!pinnedNodeTooltipAnchor || nodeTooltipList.hidden) {
+          return;
+        }
+        positionNodeTooltip(pinnedNodeTooltipAnchor);
       }
 
       function createClickTargetForEdge(edgeEl) {
@@ -259,23 +399,6 @@
         }
         return Array.from(svgElement.querySelectorAll('path, line, polyline'))
           .filter((edgeEl) => isDiagramEdgeElement(edgeEl));
-      }
-
-      function getNodeIdentity(nodeEl) {
-        if (!nodeEl) return null;
-        const dataId = nodeEl.getAttribute('data-id');
-        if (dataId) return dataId;
-
-        const className = nodeEl.getAttribute('class') || '';
-        const classMatch = className.match(/\bid-([A-Za-z0-9_]+)\b/);
-        if (classMatch) return classMatch[1];
-
-        const id = nodeEl.id || '';
-        const flowMatch = id.match(/(?:flowchart|graph)-([A-Za-z0-9_]+)-\d+$/i);
-        if (flowMatch) return flowMatch[1];
-
-        const fallbackLabel = nodeEl.querySelector('text')?.textContent?.trim();
-        return fallbackLabel || null;
       }
 
       function getEdgeIdentity(edgeEl) {
@@ -644,9 +767,12 @@
         clickTarget.addEventListener('click', (event) => {
           event.stopPropagation();
           event.preventDefault();
+          clearPinnedEdgeTooltipState();
+          clearLockedNodeSummaryButton();
+          hideNodeSummaryPopover();
+          hideNodeSummaryButton(true);
           if (activeSelection && activeSelection.pathElement === edgeEl) {
             clearActiveSelection();
-            clearAllPinnedEdgeTooltips();
             hideEdgeTooltip(true);
             return;
           } else {
@@ -654,7 +780,7 @@
           }
           const { items, metadataKey } = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge, edgeMetadataKeyByEdge);
           if (!items || items.length === 0) {
-            clearAllPinnedEdgeTooltips();
+            clearPinnedEdgeTooltipState();
             hideEdgeTooltip(true);
             return;
           }
@@ -662,21 +788,21 @@
           showEdgeTooltip(items, event, metadataKey);
         });
         clickTarget.addEventListener('mouseenter', (event) => {
-          if (isAnyEdgeTooltipPinned()) {
+          if (isEdgeTooltipPinned()) {
             return;
           }
           const { items, metadataKey } = getEdgeTooltipItems(edgeEl, allDiagramEdges, fallbackLabelsByEdge, edgeMetadataKeyByEdge);
           showEdgeTooltip(items, event, metadataKey);
         });
         clickTarget.addEventListener('mousemove', (event) => {
-          if (edgeTooltip.hidden || isAnyEdgeTooltipPinned()) {
+          if (tooltipList.hidden || isEdgeTooltipPinned()) {
             return;
           }
           positionEdgeTooltip(event.clientX, event.clientY);
         });
         clickTarget.addEventListener('mouseleave', (event) => {
           const related = event.relatedTarget;
-          if (edgeTooltip && related && edgeTooltip.contains(related)) {
+          if (tooltipList && related && tooltipList.contains(related)) {
             return;
           }
           if (edgeTooltipDetail && related && edgeTooltipDetail.contains(related)) {
@@ -696,15 +822,25 @@
         registerEdgeEventListeners(edgeEl, clickTarget);
       });
 
-      function resetNodeInteractionUi(event, { preventDefault = false } = {}) {
+      function resetNodeInteractionUi(event, { preventDefault = false, preserveNodeTooltip = false, preserveEdgeTooltip = false } = {}) {
         if (event) {
           if (preventDefault) {
             event.preventDefault();
           }
           event.stopPropagation();
         }
-        clearAllPinnedEdgeTooltips();
-        hideEdgeTooltip(true);
+        const shouldPreserveNodeTooltip = preserveNodeTooltip && !nodeTooltipList.hidden;
+        clearPinnedNodeTooltipState();
+        clearLockedNodeSummaryButton();
+        hideNodeSummaryPopover();
+        hideNodeSummaryButton(true);
+        if (!shouldPreserveNodeTooltip) {
+          hideNodeTooltip(true);
+        }
+        if (!preserveEdgeTooltip) {
+          hideEdgeTooltip(true);
+          clearPinnedEdgeTooltipState();
+        }
         hideNodeContextMenu();
         if (pendingNodeClickTimer) {
           clearTimeout(pendingNodeClickTimer);
@@ -712,8 +848,11 @@
         }
       }
 
-      if (edgeTooltip) {
-        edgeTooltip.addEventListener('mouseleave', (event) => {
+      if (tooltipList) {
+        tooltipList.addEventListener('mouseleave', (event) => {
+          if (isEdgeTooltipPinned()) {
+            return;
+          }
           const related = event.relatedTarget;
           if (edgeTooltipDetail && related && edgeTooltipDetail.contains(related)) {
             return;
@@ -722,51 +861,88 @@
         });
       }
 
+      if (nodeTooltipList) {
+        nodeTooltipList.addEventListener('mouseleave', () => {
+          hideNodeTooltip();
+        });
+      }
+
       const allNodes = svg.querySelectorAll('.node'); 
 
 
       function registerNodeEventListeners(node) {
         node.addEventListener('mouseenter', (event) => {
-          if (lockedNode) return;
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
-          const highlight = getHighlightSubgraph(nodeId, svg);
-          fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
-          if (isAnyEdgeTooltipPinned()) {
+          if (!lockedNode) {
+            const highlight = getHighlightSubgraph(nodeId, svg);
+            fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+          }
+          const nodeContext = resolveNodeSummaryContext(node);
+          if (nodeContext) {
+            showNodeSummaryButton(nodeContext);
+          }
+          if (isNodeTooltipPinned()) {
             return;
           }
           const nodeDetails = window.CROSSWAY_NODE_DETAILS?.[nodeId];
           if (nodeDetails && Object.keys(nodeDetails).length > 0) {
             showNodeTooltip(nodeDetails, event);
           } else {
-            hideEdgeTooltip();
+            hideNodeTooltip();
           }
         });
         node.addEventListener('mousemove', (event) => {
-          if (edgeTooltip.hidden || isAnyEdgeTooltipPinned()) {
+          if (nodeTooltipList.hidden || isNodeTooltipPinned()) {
             return;
           }
-          positionEdgeTooltip(event.clientX, event.clientY);
+          positionNodeTooltip(event.currentTarget);
         });
         node.addEventListener('mouseleave', () => {
-          if (lockedNode) return;
-          resetGraphFade(svg);
-          hideEdgeTooltip();
+          if (!lockedNode) {
+            resetGraphFade(svg);
+
+            if (!nodeSummaryPinnedContext || nodeSummaryPinnedContext.nodeEl !== node) {
+              scheduleNodeSummaryButtonHide();
+            }
+          }
+          hideNodeTooltip();
         });
         node.addEventListener('click', (event) => {
-          resetNodeInteractionUi(event);
+          resetNodeInteractionUi(event, { preserveNodeTooltip: true, preserveEdgeTooltip: true });
           const nodeId = getNodeIdentity(node);
           if (!nodeId) return;
+          const nodeContext = resolveNodeSummaryContext(node);
+          if (nodeContext) {
+            showNodeSummaryButton(nodeContext);
+          }
           pendingNodeClickTimer = window.setTimeout(() => {
             pendingNodeClickTimer = null;
             if (lockedNode === nodeId) {
               lockedNode = null;
               resetGraphFade(svg);
+              clearPinnedNodeTooltipState();
+              clearLockedNodeSummaryButton();
+              hideNodeTooltip(true);
               return;
             }
             lockedNode = nodeId;
             const highlight = getHighlightSubgraph(nodeId, svg);
             fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+            const lockedNodeDetails = window.CROSSWAY_NODE_DETAILS?.[nodeId];
+            if (lockedNodeDetails && Object.keys(lockedNodeDetails).length > 0) {
+              showNodeTooltip(lockedNodeDetails, { currentTarget: node });
+              pinCurrentNodeTooltip(node);
+            } else {
+              clearPinnedNodeTooltipState();
+              hideNodeTooltip(true);
+            }
+            if (nodeContext) {
+              lockNodeSummaryButton(nodeContext);
+            } else {
+              clearLockedNodeSummaryButton();
+              hideNodeSummaryButton(true);
+            }
           }, NODE_DOUBLE_CLICK_DELAY_MS);
         });
         node.addEventListener('dblclick', (event) => {
@@ -786,9 +962,21 @@
         allNodes,
         getNodeIdentity,
         openNodeFile,
-        stage
+        openNodeXrefFile,
+        stage,
+        onBeforeShow: () => {
+          clearPinnedNodeTooltipState();
+          hideNodeTooltip(true);
+          clearLockedNodeSummaryButton();
+          hideNodeSummaryPopover();
+          hideNodeSummaryButton(true);
+        }
       });
 
+      stage.addEventListener('scroll', () => {
+        refreshNodeSummaryAnchors();
+        refreshPinnedNodeTooltipAnchor();
+      });
 
       svg.addEventListener('click', () => {
         if (window.CROSSWAY_IGNORE_NEXT_SVG_CLICK) {
@@ -796,11 +984,14 @@
           return;
         }
 
-        clearAllPinnedEdgeTooltips();
+        clearPinnedTooltipState();
+        clearLockedNodeSummaryButton();
         clearActiveSelection();
         lockedNode = null;
         resetGraphFade(svg);
+        hideNodeTooltip(true);
         hideEdgeTooltip(true);
+        hideNodeSummaryPopover();
 
       });
 
@@ -813,13 +1004,18 @@
         }
 
         const hadContextMenu = !nodeContextMenu.hidden;
+        const hadNodeSummary = !nodeSummaryPopover.hidden;
         hideNodeContextMenu();
+        hideNodeSummaryPopover();
 
         const hadActiveEdgeSelection = Boolean(activeSelection);
         const hadLockedNode = Boolean(lockedNode);
+        const hadPinnedTooltip = isAnyTooltipPinned();
 
-        clearAllPinnedEdgeTooltips();
+        clearPinnedTooltipState();
+        clearLockedNodeSummaryButton();
         clearActiveSelection();
+        hideNodeTooltip(true);
         hideEdgeTooltip(true);
 
         if (hadLockedNode) {
@@ -827,7 +1023,7 @@
           resetGraphFade(svg);
         }
 
-        if (hadContextMenu || hadActiveEdgeSelection || hadLockedNode) {
+        if (hadContextMenu || hadNodeSummary || hadActiveEdgeSelection || hadLockedNode || hadPinnedTooltip) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -858,8 +1054,12 @@
     async function InitializeDiagram(mermaidCode, markdownPath) {
       diagram.innerHTML = '';
       clearAllPinnedEdgeTooltips();
+      clearLockedNodeSummaryButton();
+      hideNodeTooltip(true);
       hideEdgeTooltip(true);
       hideNodeContextMenu();
+      hideNodeSummaryPopover();
+      hideNodeSummaryButton(true);
       clearSearchHighlights();
       const id = 'm' + Date.now();
       const result = await mermaid.render(id, mermaidCode);
@@ -876,36 +1076,42 @@
       }
 
       activateDiagramSizing();
-      // Set zoom to 1 (same as reset button)
-      applyZoom(1, false);
-      // Center the source node in the viewer if available
-      // Use the svg variable already declared above
-      if (svg && window.CROSSWAY_SOURCE_NODE) {
-        // Find the node element by id, data-id, or class
-        let nodeEl = null;
-        // Try data-id
-        nodeEl = svg.querySelector(`.node[data-id='${window.CROSSWAY_SOURCE_NODE}']`);
-        // Try class
-        if (!nodeEl) nodeEl = svg.querySelector(`.node.id-${window.CROSSWAY_SOURCE_NODE}`);
-        // Try id pattern
-        if (!nodeEl) nodeEl = svg.querySelector(`.node[id*='${window.CROSSWAY_SOURCE_NODE}']`);
-        if (nodeEl) {
-          // Get the bounding box of the node
-          const nodeRect = nodeEl.getBoundingClientRect();
-          const svgRect = svg.getBoundingClientRect();
-          // Calculate node center relative to SVG
-          const nodeCenterX = nodeRect.left + nodeRect.width / 2 - svgRect.left;
-          const nodeCenterY = nodeRect.top + nodeRect.height / 2 - svgRect.top;
-          // Calculate scroll to center node in stage
-          const zoom = currentZoom || 1;
-          const scrollX = nodeCenterX * zoom - stage.clientWidth / 2;
-          const scrollY = nodeCenterY * zoom - stage.clientHeight / 2;
-          stage.scrollLeft = Math.max(0, scrollX);
-          stage.scrollTop = Math.max(0, scrollY);
+      const restoredViewport = applyInitialViewportState();
+
+      if (!restoredViewport) {
+        // Set zoom to 1 (same as reset button)
+        applyZoom(1, false);
+        // Center the source node in the viewer if available
+        // Use the svg variable already declared above
+        if (svg && window.CROSSWAY_SOURCE_NODE) {
+          // Find the node element by id, data-id, or class
+          let nodeEl = null;
+          // Try data-id
+          nodeEl = svg.querySelector(`.node[data-id='${window.CROSSWAY_SOURCE_NODE}']`);
+          // Try class
+          if (!nodeEl) nodeEl = svg.querySelector(`.node.id-${window.CROSSWAY_SOURCE_NODE}`);
+          // Try id pattern
+          if (!nodeEl) nodeEl = svg.querySelector(`.node[id*='${window.CROSSWAY_SOURCE_NODE}']`);
+          if (nodeEl) {
+            // Get the bounding box of the node
+            const nodeRect = nodeEl.getBoundingClientRect();
+            const svgRect = svg.getBoundingClientRect();
+            // Calculate node center relative to SVG
+            const nodeCenterX = nodeRect.left + nodeRect.width / 2 - svgRect.left;
+            const nodeCenterY = nodeRect.top + nodeRect.height / 2 - svgRect.top;
+            // Calculate scroll to center node in stage
+            const zoom = currentZoom || 1;
+            const scrollX = nodeCenterX * zoom - stage.clientWidth / 2;
+            const scrollY = nodeCenterY * zoom - stage.clientHeight / 2;
+            stage.scrollLeft = Math.max(0, scrollX);
+            stage.scrollTop = Math.max(0, scrollY);
+          }
+        } else if (isTableRelationsDiagram(markdownPath)) {
+          centerStageScroll();
         }
-      } else if (isTableRelationsDiagram(markdownPath)) {
-        centerStageScroll();
       }
+
+      scheduleViewportStateBroadcast();
       if (nodeSearchInput.value.trim()) {
         applySearchHighlights(nodeSearchInput.value.trim());
       }
@@ -1094,6 +1300,8 @@
         setStatus('Markdown load failed: ' + (err && err.message ? err.message : String(err)), true);
       }
     }
+
+    stage.addEventListener('scroll', scheduleViewportStateBroadcast);
 
     attachExportHandlers();
     attachZoomControls();

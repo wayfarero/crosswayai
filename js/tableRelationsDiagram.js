@@ -1,8 +1,12 @@
+const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
+const { getAIConfig } = require('./aiClient');
+const { getWorkspaceRoot } = require('./diagramCommon');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 function generateTableRelationsDiagram(ctx, uri, deps) {
-    const { vscode, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
     if (!uri || !uri.fsPath) {
         vscode.window.showErrorMessage('No file selected');
@@ -14,15 +18,19 @@ function generateTableRelationsDiagram(ctx, uri, deps) {
         const fileName = path.basename(uri.fsPath, path.extname(uri.fsPath));
 
         // Get workspace root
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage('No workspace folder found');
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
             return;
         }
-        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+        const aiConfig = getAIConfig();
+        if (aiConfig.enabled !== true) {
+            vscode.window.showErrorMessage('AI Summary is disabled or not configured. Enable it in .crosswayai/crosswayai_settings.json.');
+            return;
+        }
 
         // Read the template file
-        const templatePath = path.join(ctx.extensionPath, 'resources', 'mermaid_prompts', '@mermaid_table_relations');
+        const templatePath = path.join(ctx.extensionPath, 'resources', 'ai_prompts', '@mermaid_table_relations');
         const templateContent = fs.readFileSync(templatePath, 'utf8');
 
         // Replace <databasename> and <workspaceRoot> with actual values

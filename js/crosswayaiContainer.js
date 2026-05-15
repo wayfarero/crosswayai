@@ -1,7 +1,16 @@
-const { resolveWorkspaceRoot } = require('./diagramCommon');
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const {
+    getWorkspaceRoot,
+    resolveXrefFilePath
+} = require('./diagramCommon');
+const { generateNodeSummary } = require('./nodeSummary');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 function createMermaidViewer(deps) {
-    const { vscode, fs, path, http, CrossWayAILog } = deps;
+    const { http } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
     let mermaidServer = null;
     let mermaidServerRoot = null;
@@ -13,6 +22,17 @@ function createMermaidViewer(deps) {
     let markdownFileWatcher = null;
     let markdownSaveListener = null;
     let refreshInProgress = false;
+    const viewerViewportStates = new Map();
+
+    function postNodeSummaryResult(message) {
+        if (!mermaidViewerPanel) {
+            return Promise.resolve(false);
+        }
+        return mermaidViewerPanel.webview.postMessage(message).then(
+            () => true,
+            () => false
+        );
+    }
 
     function persistMermaid(workspaceRoot, diagramType, targetFileName, mermaidGraph) {
         try {
@@ -85,8 +105,27 @@ function createMermaidViewer(deps) {
             if (message.type === 'navigate') {
                 navigate(message.url);
             }
-            if (message.type === 'openFile' && message.filePath) {
-                vscodeApi.postMessage({ type: 'openFile', filePath: message.filePath });
+            if ((message.type === 'openFile' || message.type === 'openXrefFile') && message.filePath) {
+                vscodeApi.postMessage({ type: message.type, filePath: message.filePath });
+            }
+            if (message.type === 'generateNodeSummary') {
+                vscodeApi.postMessage({
+                    type: 'generateNodeSummary',
+                    nodeId: message.nodeId || null,
+                    filePath: message.filePath || null
+                });
+            }
+            if (message.type === 'viewerViewportState') {
+                vscodeApi.postMessage({
+                    type: 'viewerViewportState',
+                    viewport: message.viewport || null
+                });
+            }
+            if (message.type === 'nodeSummaryResult') {
+                try {
+                    frame.contentWindow?.postMessage(message, '*');
+                } catch (_) {
+                }
             }
         });
     </script>
@@ -126,11 +165,42 @@ function createMermaidViewer(deps) {
         const viewerUrlPath = toUrlPath('html/crosswayaiViewer.html');
         const fileQuery = '/' + toUrlPath(targetMdRelPath).replace(/^\/+/, '');
         const refreshToken = Date.now();
-        return `http://127.0.0.1:${port}/${viewerUrlPath}?file=${fileQuery}&refresh=${refreshToken}`;
+        const viewportState = viewerViewportStates.get(String(targetMdRelPath || '').toLowerCase()) || null;
+        let viewportQuery = '';
+
+        if (viewportState) {
+            try {
+                viewportQuery = `&viewport=${encodeURIComponent(JSON.stringify(viewportState))}`;
+            } catch (_) {
+                viewportQuery = '';
+            }
+        }
+
+        return `http://127.0.0.1:${port}/${viewerUrlPath}?file=${fileQuery}&refresh=${refreshToken}${viewportQuery}`;
+    }
+
+    function normalizeViewerViewportState(viewport) {
+        if (!viewport || typeof viewport !== 'object') {
+            return null;
+        }
+
+        const zoom = Number(viewport.zoom);
+        const scrollLeft = Number(viewport.scrollLeft);
+        const scrollTop = Number(viewport.scrollTop);
+
+        if (!Number.isFinite(zoom) || !Number.isFinite(scrollLeft) || !Number.isFinite(scrollTop)) {
+            return null;
+        }
+
+        return {
+            zoom: Math.min(10, Math.max(0.1, zoom)),
+            scrollLeft: Math.max(0, scrollLeft),
+            scrollTop: Math.max(0, scrollTop)
+        };
     }
 
     function queueViewerRefresh() {
-        if (!mermaidViewerPanel || !activeMarkdownRelativePath || !mermaidServerPort || refreshInProgress) {
+        if (!mermaidViewerPanel || !mermaidViewerPanel.visible || !activeMarkdownRelativePath || !mermaidServerPort || refreshInProgress) {
             return;
         }
 
@@ -234,6 +304,21 @@ function createMermaidViewer(deps) {
         }
 
         return null;
+    }
+
+    function openTextFile(filePath, { failurePrefix = 'file' } = {}) {
+        const fileUri = vscode.Uri.file(filePath);
+        vscode.workspace.openTextDocument(fileUri).then(
+            (doc) => vscode.window.showTextDocument(doc, {
+                viewColumn: vscode.ViewColumn.One,
+                preview: false,
+                preserveFocus: false
+            }),
+            (err) => {
+                CrossWayAILog.appendLine(`Failed to open ${failurePrefix}: ${filePath} - ${err.message}`);
+                vscode.window.showErrorMessage(`CrossWayAI: Could not open ${failurePrefix}: ${path.basename(filePath)}`);
+            }
+        );
     }
 
     async function promptForMarkdownTarget(workspaceRoot) {
@@ -419,15 +504,8 @@ function createMermaidViewer(deps) {
     }
 
     async function openCrosswayAIViewer(context, uri) {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
-            return;
-        }
-
-        const workspaceRoot = resolveWorkspaceRoot(workspaceFolders);
+        const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot) {
-            vscode.window.showErrorMessage('CrossWayAI: Unable to resolve workspace root.');
             return;
         }
         const extensionRoot = context && context.extensionPath ? context.extensionPath : path.resolve(__dirname, '..');
@@ -475,19 +553,59 @@ function createMermaidViewer(deps) {
 
                 mermaidViewerPanel.webview.onDidReceiveMessage((message) => {
                     if (message.type === 'openFile' && message.filePath) {
-                        const filePath = message.filePath;
-                        const fileUri = vscode.Uri.file(filePath);
-                        vscode.workspace.openTextDocument(fileUri).then(
-                            (doc) => vscode.window.showTextDocument(doc, {
-                        viewColumn: vscode.ViewColumn.One,
-                        preview: false,
-                        preserveFocus: false
-                    }),
-                            (err) => {
-                                CrossWayAILog.appendLine(`Failed to open file: ${filePath} - ${err.message}`);
-                                vscode.window.showErrorMessage(`CrossWayAI: Could not open file: ${path.basename(filePath)}`);
-                            }
-                        );
+                        openTextFile(message.filePath, { failurePrefix: 'file' });
+                    }
+
+                    if (message.type === 'openXrefFile' && message.filePath) {
+                        const lookupWorkspaceRoot = mermaidServerRoot || workspaceRoot;
+                        const xrefFilePath = resolveXrefFilePath(message.filePath, lookupWorkspaceRoot);
+                        if (!xrefFilePath) {
+                            CrossWayAILog.appendLine(`XREF file not found for source file: ${message.filePath}`);
+                            vscode.window.showErrorMessage(`CrossWayAI: Could not find XREF file for ${path.basename(message.filePath)}`);
+                            return;
+                        }
+
+                        openTextFile(xrefFilePath, { failurePrefix: 'XREF file' });
+                    }
+                    if (message.type === 'generateNodeSummary') {
+                        CrossWayAILog.appendLine(`Node summary requested for node ${message.nodeId || 'unknown'} (${message.filePath || 'no file path'})`);
+                        (async () => {
+                            const result = await generateNodeSummary({
+                                filePath: message.filePath || null,
+                                nodeId: message.nodeId || null,
+                            });
+
+                            await postNodeSummaryResult({
+                                type: 'nodeSummaryResult',
+                                nodeId: message.nodeId || null,
+                                filePath: message.filePath || null,
+                                ok: Boolean(result && result.ok),
+                                summary: result && result.ok ? result.summary : undefined,
+                                reason: result && !result.ok ? result.reason : undefined
+                            });
+                        })().catch((error) => {
+                            CrossWayAILog.appendLine(`[NodeSummary] unexpected failure: ${error.message}`);
+                            postNodeSummaryResult({
+                                type: 'nodeSummaryResult',
+                                nodeId: message.nodeId || null,
+                                filePath: message.filePath || null,
+                                ok: false,
+                                reason: 'AI_GENERATION_FAILED'
+                            }).then(undefined, () => {});
+                        });
+                    }
+                    if (message.type === 'viewerViewportState') {
+                        const normalizedViewport = normalizeViewerViewportState(message.viewport);
+                        if (!normalizedViewport) {
+                            return;
+                        }
+
+                        const markdownKey = String(activeMarkdownRelativePath || '').toLowerCase();
+                        if (!markdownKey) {
+                            return;
+                        }
+
+                        viewerViewportStates.set(markdownKey, normalizedViewport);
                     }
                 });
 
@@ -535,10 +653,20 @@ function createMermaidViewer(deps) {
         }
     }
 
+    function isMermaidViewerOpen() {
+        return Boolean(mermaidViewerPanel);
+    }
+
+    function isMermaidViewerVisible() {
+        return Boolean(mermaidViewerPanel && mermaidViewerPanel.visible);
+    }
+
     return {
         openCrosswayAIViewer,
         deactivateMermaidViewer,
-        persistMermaid
+        persistMermaid,
+        isMermaidViewerOpen,
+        isMermaidViewerVisible
     };
 }
 

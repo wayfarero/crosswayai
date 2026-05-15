@@ -1,3 +1,4 @@
+const vscode = require('vscode');
 const {
     generateDiagram,
     createMermaidGraphWriter,
@@ -16,7 +17,7 @@ async function generateImpactDiagram(context, uri, deps) {
 }
 
 function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
-    const { vscode, getDsMapArray } = deps;
+    const { getDsMapArray } = deps;
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
     const startNodeId = targetNode.NodeId;

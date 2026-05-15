@@ -1,4 +1,5 @@
-﻿    #edgeTooltip {
+﻿    #edgeTooltip,
+    #nodeTooltip {
       position: fixed;
       z-index: 30;
       max-width: min(420px, calc(100vw - 20px));
@@ -13,14 +14,17 @@
       pointer-events: auto;
       white-space: normal;
     }
-    #edgeTooltip[hidden] {
+    #edgeTooltip[hidden],
+    #nodeTooltip[hidden] {
       display: none;
     }
-    #edgeTooltip ul {
+    #edgeTooltip ul,
+    #nodeTooltip ul {
       margin: 0;
       padding-left: 16px;
     }
-    #edgeTooltip li {
+    #edgeTooltip li,
+    #nodeTooltip li {
       margin: 2px 0;
     }
     #edgeTooltip li.param-line {
@@ -59,16 +63,17 @@
       margin: 0;
       padding-left: 16px;
     }
-    #edgeTooltip .tooltip-title {
+    #edgeTooltip .tooltip-title,
+    #nodeTooltip .tooltip-title {
       margin-bottom: 8px;
       color: #f9fafb;
       font-size: 13px;
       font-weight: 700;
     }
-    #edgeTooltip .db-group + .db-group {
+    #nodeTooltip .db-group + .db-group {
       margin-top: 8px;
     }
-    #edgeTooltip .db-name {
+    #nodeTooltip .db-name {
       margin-bottom: 4px;
       color: #ffffff;
       font-weight: 700;

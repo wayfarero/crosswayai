@@ -1,3 +1,4 @@
+const vscode = require('vscode');
 const {
     generateDiagram,
     createMermaidGraphWriter,
@@ -14,7 +15,7 @@ async function generateCallDiagram(context, uri, deps) {
 }
 
 function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
-    const { vscode, getDsMapArray } = deps;
+    const { getDsMapArray } = deps;
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
     const startNodeId = targetNode.NodeId;

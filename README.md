@@ -8,6 +8,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 - **Multi-Project Workspace Support:** Supports workspaces containing multiple OpenEdge projects.
 - **Dependency Mapping:** Triggers a deep analysis using an underlying ABL script to generate a dependency map.
 - **Context Menu Integration:** Access diagram generation commands directly from the editor or explorer context menus for quick analysis.
+- **AI support integration:** Several Diagram functionalities are handled via existing AI tooling (vscode / html): Table Relations Diagram, node functional description etc.
 - **Multiple Diagram Types:** Provides commands to generate various diagrams to visualize your application's architecture, including:
     - Impact Diagram
     - Include Diagram
@@ -17,16 +18,23 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
     - Package Diagram
     - Instance Chain Diagram
     - Property Access Diagram
-    - Table Relations Diagram (AI)
+    - Table Relations Diagram 
 
 ## Requirements
 
 - Progress OpenEdge 11.7 - 12.8 installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension (installed automatically with CrossWayAI)
 - Windows support only (for now)
+- Workspace configuration file (`.code-workspace`) present in the workspace root folder, next to the workspace project folders
 
-## Recomandations
-- Workspace configuration file (.code-workspace) present 
+## AI Configuration
+
+In order to use the integrated AI support you need to set the AI enabled = true (disabled by default)
+
+CrossWayAI supports both external AI providers (OpenAI-compatible APIs) and VS Code Language Models.
+
+For detailed setup instructions, see: [AI Configuration Guide](./resources/AI_CONFIGURATION.md)
+
 
 ## Before You Start
 
@@ -62,15 +70,20 @@ The following commands are available in the Command Palette :
 enable users to generate table relationship diagrams using the chat agent.
 
 and via context menus:
+    
+- `Diagram`:
 
--   `Impact Diagram`: Generate an impact analysis diagram for the selected file.
--   `Include Diagram`: Generate an include diagram for the selected file
--   `Interface Diagram`: Generate an interface diagram for the selected class or interface.
--   `Inheritance Diagram`: Generate an inheritance diagram for the selected class.
--   `Call Diagram`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
--   `Package Diagram`: Generate a package diagram for the selected file.
--   `Instance Chain Diagram`: Generate an instantiation chain diagram for the selected file.
--   `Property Access Diagram`: Generate a property access chain diagram for the selected file.
+    - `Impact`: Generate an impact analysis diagram for the selected file.
+    - `Include`: Generate an include diagram for the selected file
+    - `Interface`: Generate an interface diagram for the selected class or interface.
+    - `Inheritance`: Generate an inheritance diagram for the selected class.
+    - `Call`: Generate a call (invoke and run) diagram for the selected class, procedure or .w .
+    - `Package`: Generate a package diagram for the selected file.
+    - `Instance Chain`: Generate an instantiation chain diagram for the selected file.
+    - `Property Access`: Generate a property access chain diagram for the selected file.
+    
+- `File`:
+    - `XREF`: Open the corresponding XREF file for the selected file.
 
 ![Impact Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/impactdiagram.gif)
 
@@ -84,199 +97,18 @@ and via context menus:
 
 ## Release Notes
 
-### 1.8.2
+### 1.8.3
   - Improvements: 
-    - refactored CrossWayAI Viewer code for better maintainability
-  - Bugfix:
-    - corrected support for OE versions starting with 11.7 
-
-
-### 1.8.1
-  - Improvements: 
-    - added support for OE versions starting with 11.7
-  - Bugfix:
-    - fix `Package Diagram` not showing Database access tooltip on file nodes
-    - fix hover event on `run` links to show tooltip information with internal procedures being called and their signatures
-    - corrected logging in crosswayai.log, fixed automatic log cleanup on xref updates
-
-### 1.8.0
-  - Improvements: 
-    - Added support for new `Property Access Diagram` diagram type for visualizing the property access chain a file node is involved  
-    - Added support for depth level filtering in the CrossWayAI Viewer to be able to filter out nodes and links which span on higher levels of relationship
-    - Added support for CAST link types, shown with a yellow colour in `Impact Diagram` 
-    - Added hover and pin support for invoke links to show an extra detail tooltip containing the used method signatures 
-  - BugFix:
-    - corrected `CrossWayAI: Dump All DB Definitions` command in multi-project workspace, outputting separate .df files under separate project subfolders of .crosswayai/dump folder
-    - corrected sync of DB access mappings on changed file save event
-    - corrected `Package Diagram` to show the corresponding source directory on main root package
-
-### 1.7.8
-
-- Bugfix: corrected handling of "inherited-property" link, removed tooltip for "new" links
-- Improvement: 
-    - package diagram highligthing updated to reflect path between hovered node vs. main package node 
-    - added double-click event on file node to open the file in the editor
-    - added database access tooltip on file node hover event
-    - added support to automatically sync file reference mappings on saving updates over successfully compiled ABL files
-
-### 1.7.7
-
-- Bugfix: corrected build package
-
-### 1.7.6
-
-- Bugfix: corrected edge cases on "run" file dependency mapping
-- Improvement: link tooltip now supports "public-property" as well, "new" links are now shown using green colour, minor code refactoring regarding colour handling
-
-### 1.7.5
-
-- Bugfix: corrected some more edge cases on include file dependency mapping
-- Improvements on zoom functionality: center on mouse cursor, limit the zoom in to the reset level, corrected the reset button to show the original view when the .md file was opened
-
-### 1.7.4
-
-- Bugfix: corrected some more edge cases on include file dependency mapping
-
-### 1.7.3
-
-- Bugfix: Properly determine workspaceRoot for multi-project workspaces and ABL script now uses -T `.crosswayai/temp` for temp files
-- Bugfix: Corrected mapping of all types of include files dependencies in the `CrossWayAI: Generate Dependency Map` command
-
-### 1.7.2
-
-- Added support for searching nodes in CrossWayAI Viewer
-
-### 1.7.1
-
-- Fixed "new" (instantiation) links not showing up on impact diagrams
-- Added new `Instance Chain Diagram` command to visualize instantiation ("new") chains for a selected file
-- Added right-click context menu on diagram nodes in CrossWayAI Viewer with `Open File` action to navigate directly to the source file
-
-### 1.7.0
-
-- Updated Package Diagram to be generated by the extension, not by AI chat prompt
-- Added support for multiple project workspace
-- Fixed unique identification of file nodes
-- Enhanced node label visibility ([project subpath]\(source directory)\package)
-- Multiple code refactorings for cleaner maintenance
-- Corrected impact diagram to correctly show the public-property and implements links
-
-### 1.6.7
-
-- Bug fixed links tooltip visibility in CrossWayAI Viewer
-- Changed default legend state to collapsed in CrossWayAI Viewer
-- Updated README.md information
-- Fixed cleanup of `.crosswayai/temp` folder after `Dump All DB Definitions` command
-
-### 1.6.6
-
-- Added legend box in the CrossWayAI Viewer for better reference
-- Added hover functionality over nodes and links + tooltip functionality for links in Call and Impact diagrams, for better visibility
-
-### 1.6.5
-
-- Added support for new `Package Diagram` diagram type for visualizing the complete package tree structure of a class
-- Code refactoring improvements for better maintainability
-
-### 1.6.4
-
-- Refactored code diagram generation commands with enhanced node and link visibility:
-  - Added colored node borders that differentiate by node type
-  - Implemented colored arrows that differentiate by link type for better visual clarity
-  - Updated node labels to display the relative path of the node
-
-### 1.6.3
-
-- Bug fixes in CrossWayAI Viewer link highlight functionality
-- Improved Table Relations diagram prompt handling
-- Bug fixed Impact diagram generation
-- Automatically highlight circular references in Impact diagram
-
-### 1.6.2
-
-- Added mouse click highlight arrow functionality in the CrossWayAI viewer
-- dropped dependecy towards [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram) VS Code extension, replacing it's intended use with standard chat prompt for `Table Relations Diagram` command
-- dropped the `Send to @mermAId` command as no longer needed
-
-### 1.6.1
-
-- Added mouse zoom in/out and drag functionality in the CrossWayAI viewer
-
-### 1.6.0
-
-- Added support for `Inheritance Diagram` via new explorer and editor context menu
-
-### 1.5.2
-
-- Bug fixes on diagram commands
-- Added new explorer and editor context command `Table relations` to AI generate the database table relations diagram (.md file under .crosswayai/mermaid) out of the selected .df file , using the @mermAId chat agent
-
-
-### 1.5.1
-
-- Added support to generate database table relations diagram using `@mermaid_table_relations` template prompt out of .df files dumped by new `CrossWayAI: Dump All DB Definitions` command
-
-
-### 1.5.0
-
-- Bug fixed CrossWayAI submenu visibility in explorer context menu for supported file types.
-- Renamed all diagram types options by removing the `Generate` prefix
-- Renamed mermaid viewer container tab to "CrossWayAI viewer - <.md file name>"
-- Added new `Call Diagram` option
-
-### 1.4.4
-
-- Added new `Generate Interface Diagram` option
-- Bug fixing on mermaid rendering auto refresh.
-
-### 1.4.3
-
-- More code refactoring on HTML components for improved maintainability.
-
-### 1.4.2
-
-- Refactored extension JavaScript code to improve maintainability and simplify future bug fixes.
-- Fixed impact diagram generation issues, including layout and duplicate-link rendering behavior.
-
-### 1.4.1
-
-- Bug fixes for workspace configuration and source-path handling.
-- Refactoring of xref and diagram processing internals.
-- Stability improvements for Mermaid rendering and dependency map generation.
-
-### 1.4.0
-
-- Dropped the Markdown Preview Mermaid extension integration and replaced it with a a proprietary custom Mermaid Viewer.
-- Added a new Mermaid viewer command: `CrossWayAI: View diagram`.
-- Updated the `Generate Impact Diagram` and `Generate Include Diagram` to automatically show the generated diagram using the custom Mermaid Viewer
-
-### 1.3.0
-
-- Renamed extension from CrosswAI to CrossWayAI
- 
-- Updated package dependencies to automatically install required extensions:
-  - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp)
-  - [Markdown Preview Mermaid Support](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)
-  - [vscode-mermAId](https://marketplace.visualstudio.com/items?itemName=ms-vscode.copilot-mermaid-diagram)
-
-### 1.2.1
-
-- Added support to send a prompt text to @mermaid chat agent from a text file.
-
-### 1.1.1
-
-- The mermaid file for the generate diagram commands is now persisted under the .crosswayai/mermaid folder for future usage.
-
-### 1.1.0
-
--   Support for Impact and Include Diagrams has been added.
-
-### 1.0.0
-
--   Initial release of CrossWayAI.
--   Added commands for generating dependency maps and various diagrams.
--   File discovery and hand-off to ABL backend for analysis.
-
+    - introduced .crosswayai/crosswayai_settings.json default configuration file supporting ai settings; Table Relations diagram is restricted to use AI enabled = true.
+    - AI node summary tooltip functionality is now available on all file nodes on every type of file related diagrams
+    - reorganized CrossWayAI context menu, added new right-click context menu option to open the corresponding XREF file from the explorer, editor and `CrossWayAI Viewer`
+    - added automatic refresh of currently active `CrossWayAI Viewer` diagram on xref updates
+    - code refactoring for better maintainability
+  - Bug Fixes: 
+    - corrected pin tooltip behaviour for nodes and links; now possible to pin both a node DB access tooltip and a link tooltip at the same time
+    
+
+For the full release history, see the [CHANGELOG](./CHANGELOG.md).
 ---
 
 **Enjoy!**

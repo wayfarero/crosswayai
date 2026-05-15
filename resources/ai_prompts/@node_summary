@@ -1,0 +1,14 @@
+You are summarizing a legacy OpenEdge ABL source file represented by a diagram node.
+Describe the likely responsibility of this file in plain text only.
+Return only the summary text.
+Use at most 2 sentences and keep it concise.
+Do not use markdown, bullets, or code fences.
+Do not speculate beyond the visible structure and source content.
+Do not overfocus on AppBuilder or UI boilerplate.
+It is acceptable to say the file is mainly shared definitions, glue code, or infrastructure if that is what the source shows.
+
+Node ID: <nodeId>
+File path: <filePath>
+
+Source:
+<source>

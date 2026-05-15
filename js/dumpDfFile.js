@@ -1,4 +1,8 @@
-const { runABLScript, cleanupDirectory, resolveWorkspaceRoot, getProjectOEVersion, resolveProjectRootFromName } = require('./diagramCommon');
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const { runABLScript, cleanupDirectory, getWorkspaceRoot, getProjectOEVersion, resolveProjectRootFromName } = require('./diagramCommon');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 /**
  * Resolves relative paths in a connect string to absolute paths.
@@ -8,7 +12,7 @@ const { runABLScript, cleanupDirectory, resolveWorkspaceRoot, getProjectOEVersio
  * @param {object} path - Node.js path module
  * @returns {string} Connect string with resolved paths
  */
-function resolveConnectString(connectString, workspaceRoot, path) {
+function resolveConnectString(connectString, workspaceRoot) {
     if (!connectString) 
         return connectString;
     
@@ -51,15 +55,15 @@ function shouldResolveConnectString(connectString) {
  * @returns 
  */
 async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfFilePath) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
 
     // If projectName is not provided, use the workspace Root folder name as the project name
     if (!projectName || projectName.trim() === "") {
         projectName = path.basename(workspaceRoot);
     }
 
-    const projectRoot = resolveProjectRootFromName(vscode.workspace, projectName, path, workspaceRoot) || workspaceRoot;
-    const oeversion = getProjectOEVersion(projectRoot, fs, path, CrossWayAILog, vscode);
+    const projectRoot = resolveProjectRootFromName(vscode.workspace, projectName, workspaceRoot) || workspaceRoot;
+    const oeversion = getProjectOEVersion(projectRoot);
 
     // Pass param and parameterFile as extra arguments
     const extraArgs = ['-param', JSON.stringify({ dbName, workspaceRoot, projectName })];
@@ -83,16 +87,14 @@ async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfF
  * @returns {Promise<void>}
  */
 async function dumpAllDBDefinitions(context, deps) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
-    const workspaceFolders = vscode.workspace.workspaceFolders;
+    const CrossWayAILog = getCrossWayAILog();
 
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
+    // Create .crosswayai directory in project root folder
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
         return;
     }
 
-    // Create .crosswayai directory in project root folder
-    const workspaceRoot = resolveWorkspaceRoot(vscode.workspace.workspaceFolders, fs, CrossWayAILog);
     const crossWayDir   = path.join (workspaceRoot, '.crosswayai');
 
     if (!fs.existsSync(crossWayDir)) {
@@ -100,6 +102,7 @@ async function dumpAllDBDefinitions(context, deps) {
     }
 
     // Find all workspace roots that contain openedge-project.json
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
     const projectRoots = [];
     for (const folder of workspaceFolders) {
         const projectPath = path.join(folder.uri.fsPath, 'openedge-project.json');
@@ -144,11 +147,11 @@ async function dumpAllDBDefinitions(context, deps) {
             .map(dbConn => {
                 const connectString = dbConn && dbConn.connect;
                 return shouldResolveConnectString(connectString)
-                    ? resolveConnectString(connectString, projectRoot, path)
+                    ? resolveConnectString(connectString, projectRoot)
                     : connectString;
             })
             .filter(Boolean);
-        await preparePfFile(connectValues, pfFilePath, fs);
+        await preparePfFile(connectValues, pfFilePath);
 
         for (const dbConn of dbConnections) {
             const dbName = dbConn.name;
@@ -161,7 +164,7 @@ async function dumpAllDBDefinitions(context, deps) {
         
         // Clean up temp directory for this project
         const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
-        await cleanupDirectory(tempDir, fs, CrossWayAILog);
+        await cleanupDirectory(tempDir);
     }
     
     CrossWayAILog.appendLine('Completed dumpAllDBDefinitions.\n');
@@ -176,8 +179,7 @@ async function dumpAllDBDefinitions(context, deps) {
  * @param {object} fs - Node.js fs module (dependency injected).
  * @returns {Promise<void>}
  */
-async function preparePfFile(connectValues, pfFilePath, fs) {
-    const path = require('path');
+async function preparePfFile(connectValues, pfFilePath) {
     await fs.promises.mkdir(path.dirname(pfFilePath), { recursive: true });
     const content = connectValues.join('\n');
     await fs.promises.writeFile(pfFilePath, content, 'utf8');

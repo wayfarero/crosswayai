@@ -1,3 +1,5 @@
+const vscode = require('vscode');
+const path = require('path');
 const {
     generateDiagram,
     getDsMapArray,
@@ -9,9 +11,9 @@ async function generatePackageDiagram(context, uri, deps) {
 }
 
 function generateMermaidPackageGraph(dsMap, targetNode, deps) {
-    const { vscode, workspaceRoot, path } = deps;
+    const { workspaceRoot } = deps;
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
-    const workspaceProjectName = workspaceRoot && path ? path.basename(workspaceRoot) : 'Project';
+    const workspaceProjectName = workspaceRoot ? path.basename(workspaceRoot) : 'Project';
 
     if (allFileNodes.length === 0) {
         vscode.window.showWarningMessage('CrossWayAI: dsMap.json does not contain package diagram data. Please regenerate the map.');

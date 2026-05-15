@@ -1,0 +1,6 @@
+{
+  "ai": {
+    "enabled": false,
+    "provider": "vscode"
+  }
+}

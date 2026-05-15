@@ -2,7 +2,7 @@
     "name": "crosswayai",
     "displayName": "CrossWayAI",
     "description": "A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL projects, to help developers understand project structure, navigate relationships between files and modules, and identify coupling and architectural issues. Visualize file, module, and symbol dependencies in VS Code with AI-assisted analysis. The extension uses AI to generate and update interactive dependency graphs, enabling faster code comprehension, refactoring, and architectural insights.",
-    "version": "1.8.2",
+    "version": "1.8.3",
     "publisher": "wayfare",
     "icon": "resources/CrossWayAI.png",
     "homepage": "https://github.com/wayfarero/crosswayai/blob/main/README.md",
@@ -48,6 +48,7 @@
             "onCommand:crosswayai.generateCallDiagram",
             "onCommand:crosswayai.generateInheritanceDiagram",
             "onCommand:crosswayai.openCrosswayAIViewer",
+            "onCommand:crosswayai.openXrefFile",
             "onCommand:crosswayai.dumpAllDBDefinitions",
             "onCommand:crosswayai.generateTableRelationsDiagram",
             "onCommand:crosswayai.generatePackageDiagram",
@@ -59,7 +60,19 @@
             {
                 "id": "crosswayai.submenu",
                 "label": "CrossWayAI"
-            }
+            },
+            {
+                "id": "crosswayai.diagramsubmenu",
+                "label": "Diagram",
+                "group": "navigation",
+                "parent": "crosswayai.submenu"
+            },
+            {
+                "id": "crosswayai.filesubmenu",
+                "label": "File",
+                "group": "navigation",
+                "parent": "crosswayai.submenu"
+            }            
         ],
         "commands": [
             {
@@ -72,43 +85,47 @@
             },
             {
                 "command": "crosswayai.generateImpactDiagram",
-                "title": "Impact Diagram"
+                "title": "Impact"
             },
             {
                 "command": "crosswayai.generateIncludeDiagram",
-                "title": "Include Diagram"
+                "title": "Include"
             },
             {
                 "command": "crosswayai.generateInterfaceDiagram",
-                "title": "Interface Diagram"
+                "title": "Interface"
             },
             {
                 "command": "crosswayai.generateCallDiagram",
-                "title": "Call Diagram"
+                "title": "Call"
             },
             {
                 "command": "crosswayai.generateInheritanceDiagram",
-                "title": "Inheritance Diagram"
+                "title": "Inheritance"
             },
             {
                 "command": "crosswayai.generatePackageDiagram",
-                "title": "Package Diagram"
+                "title": "Package"
             },
             {
                 "command": "crosswayai.openCrosswayAIViewer",
                 "title": "View diagram"
             },
             {
+                "command": "crosswayai.openXrefFile",
+                "title": "XREF"
+            },
+            {
                 "command": "crosswayai.generateTableRelationsDiagram",
-                "title": "Table Relations Diagram"
+                "title": "Table Relations"
             },
             {
                 "command": "crosswayai.generateInstanceChainDiagram",
-                "title": "Instance Chain Diagram"
+                "title": "Instance Chain"
             },
             {
                 "command": "crosswayai.generatePropertyAccessDiagram",
-                "title": "Property Access Diagram"
+                "title": "Property Access"
             }
         ],
         "menus": {
@@ -126,6 +143,16 @@
                 }
             ],
             "crosswayai.submenu": [
+                {
+                    "submenu": "crosswayai.diagramsubmenu",
+                    "group": "navigation"
+                },
+                {
+                    "submenu": "crosswayai.filesubmenu",
+                    "group": "navigation"
+                }
+            ],
+            "crosswayai.diagramsubmenu": [
                 {
                     "command": "crosswayai.generateCallDiagram",
                     "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/",
@@ -175,7 +202,14 @@
                     "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/",
                     "group": "navigation"
                 }
-            ]
+            ],
+            "crosswayai.filesubmenu": [
+                { 
+                    "command": "crosswayai.openXrefFile", 
+                    "when": "resourceExtname =~ /^\\.(p|P|cls|CLS|w|W)$/", 
+                    "group": "navigation" 
+                }
+            ]            
         }
     },
     "extensionDependencies": [

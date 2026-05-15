@@ -39,7 +39,7 @@
         buildLegendRow('inherits', 'inherits'),
         buildLegendRow('implements', 'implements'),
         buildLegendRow('circular', 'circular'),
-        buildLegendRow('selected', 'Selected'),
+        buildLegendRow('selected', 'selected'),
         buildLegendRow('undefined', 'multiple'),
         '</div>'
       ].join('');

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.3
+   - Improvements: 
+    - introduced .crosswayai/crosswayai_settings.json default configuration file supporting ai settings; Table Relations diagram is restricted to use AI enabled = true.
+    - AI node summary tooltip functionality is now available on all file nodes on every type of file related diagrams
+    - reorganized CrossWayAI context menu, added new right-click context menu option to open the corresponding XREF file from the explorer, editor and `CrossWayAI Viewer`
+    - added automatic refresh of currently active `CrossWayAI Viewer` diagram on xref updates
+    - code refactoring for better maintainability
+  - Bug Fixes: 
+    - corrected pin tooltip behaviour for nodes and links; now possible to pin both a node DB access tooltip and a link tooltip at the same time
+    
 ## 1.8.2
   - Improvements: 
     - refactored CrossWayAI Viewer code for better maintainability

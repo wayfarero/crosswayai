@@ -1,0 +1,93 @@
+    #nodeSummaryButton {
+      position: fixed;
+      z-index: 45;
+      width: 42px;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: #facc15;
+      box-shadow: none;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0;
+      text-shadow: 0 0 10px rgba(250, 204, 21, 0.45);
+      cursor: pointer;
+    }
+    #nodeSummaryButton:hover {
+      background: transparent;
+      box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.28), 0 6px 18px rgba(0, 0, 0, 0.32);
+    }
+    #nodeSummaryButton[hidden] {
+      display: none;
+    }
+    #nodeSummaryPopover {
+      position: fixed;
+      z-index: 46;
+      width: min(500px, calc(100vw - 24px));
+      max-height: min(280px, calc(100vh - 24px));
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: rgba(3, 7, 18, 0.97);
+      border: 1px solid #374151;
+      border-radius: 10px;
+      color: #e5e7eb;
+      padding: 12px 14px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(6px);
+      overflow: hidden;
+    }
+    #nodeSummaryPopover[hidden] {
+      display: none;
+    }
+    #nodeSummaryPopover .summary-title {
+      flex: 0 0 auto;
+      font-size: 12px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 8px;
+    }
+    #nodeSummaryPopover .summary-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      max-width: 100%;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    #nodeSummaryPopover .summary-footer {
+      flex: 0 0 auto;
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+    #nodeSummaryPopover .summary-copy {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #374151;
+      background: rgba(15, 23, 42, 0.92);
+      color: #cbd5e1;
+      border-radius: 6px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 1;
+    }
+    #nodeSummaryPopover .summary-copy:hover {
+      background: rgba(30, 41, 59, 0.98);
+      color: #f8fafc;
+    }
+    #nodeSummaryPopover .summary-error {
+      color: #fca5a5;
+    }

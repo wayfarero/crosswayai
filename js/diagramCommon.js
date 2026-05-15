@@ -6,7 +6,8 @@
  * @param {object} CrossWayAILog - Logger
  * @returns {string|null} oeversion for the project, or null if not found
  */
-function getProjectOEVersion(projectRoot, fs, path, CrossWayAILog, vscode) {
+function getProjectOEVersion(projectRoot) {
+    const CrossWayAILog = getCrossWayAILog();
     let activeProfile = null;
     const profilePath = path.join(projectRoot, '.vscode', 'profile.json');
     if (fs.existsSync(profilePath)) {
@@ -57,9 +58,21 @@ function getProjectOEVersion(projectRoot, fs, path, CrossWayAILog, vscode) {
 
     throw new Error(`Could not determine oeversion for ${projectRoot}`);
 }
+const vscode = require('vscode');
+const fs = require('fs');
 const path = require('path');
+const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 const diagramColors = require('../resources/diagram-colors.json');
+
+function normalizeConfigValue(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const text = String(value).trim();
+    return text || null;
+}
 
 /**
  * Resolves the workspace root directory from the available workspace folders.
@@ -67,16 +80,11 @@ const diagramColors = require('../resources/diagram-colors.json');
  * If the first folder is a parent of other folders, uses path.dirname of a subfolder.
  * Otherwise, uses path.dirname of the first folder.
  */
-function resolveWorkspaceRoot(workspaceFolders, fsModule, CrossWayAILog) {
+function resolveWorkspaceRoot(workspaceFolders) {
+    const CrossWayAILog = getCrossWayAILog();
     if (!workspaceFolders || workspaceFolders.length === 0) {
         if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No workspace folders found.');
         return '';
-    }
-
-    // Try to use fs from global if not provided
-    let fs = fsModule;
-    if (!fs && typeof require !== 'undefined') {
-        try { fs = require('fs'); } catch (e) { fs = null; }
     }
 
     // Look for .code-workspace file recursively upward from each workspace folder
@@ -126,7 +134,24 @@ function resolveWorkspaceRoot(workspaceFolders, fsModule, CrossWayAILog) {
     return path.dirname(firstFolderPath);
 }
 
-function resolveProjectRootFromName(workspace, projectName, path, workspaceRoot) {
+function getWorkspaceRoot() {
+    const CrossWayAILog = getCrossWayAILog();
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
+        return null;
+    }
+
+    const workspaceRoot = resolveWorkspaceRoot(workspaceFolders, CrossWayAILog);
+    if (!workspaceRoot) {
+        vscode.window.showErrorMessage('CrossWayAI: Could not resolve workspace root for XREF lookup.');
+        return null;
+    }
+
+    return workspaceRoot;
+}
+
+function resolveProjectRootFromName(workspace, projectName, workspaceRoot) {
     const trimmedProjectName = String(projectName || '').trim();
     if (!trimmedProjectName) {
         return workspaceRoot || null;
@@ -157,7 +182,29 @@ function resolveProjectRootFromName(workspace, projectName, path, workspaceRoot)
  * @param {object} [CrossWayAILog] - Optional logger.
  * @returns {Promise<void>}
  */
-async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
+// Reads the full workspace-level CrossWay settings file; user settings and env vars are ignored.
+function getCrosswayAISettingsJson(workspaceRoot) {
+    if (!workspaceRoot) {
+        return null;
+    }
+
+    const settingsPath = path.join(workspaceRoot, '.crosswayai', 'crosswayai_settings.json');
+    if (!fs.existsSync(settingsPath)) {
+        return null;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    } catch (error) {
+        throw new Error(`Invalid workspace config: ${error.message}`);
+    }
+
+    return parsed || null;
+}
+
+async function cleanupDirectory(dirPath) {
+    const CrossWayAILog = getCrossWayAILog();
     try {
         if (fs.existsSync(dirPath)) {
             await fs.promises.rm(dirPath, { recursive: true, force: true });
@@ -168,7 +215,8 @@ async function cleanupDirectory(dirPath, fs, CrossWayAILog) {
     }
 }
 
-function getRuntimeDLC(oeversion, vscode, CrossWayAILog) {
+function getRuntimeDLC(oeversion) {
+    const CrossWayAILog = getCrossWayAILog();
     try {
         const runtimes = vscode.workspace.getConfiguration('abl.configuration').get('runtimes') || [];
         const runtimeEntry = runtimes.find(r => r.name === String(oeversion));
@@ -195,7 +243,7 @@ function getRuntimeDLC(oeversion, vscode, CrossWayAILog) {
  * @returns {Promise<void>} Resolves when the process finishes successfully, rejects on error.
  */
 async function runABLScript({ context, workspaceRoot, deps, scriptName, args: extraArgs = []}) {
-    const { vscode, fs, path, CrossWayAILog } = deps;
+    const CrossWayAILog = getCrossWayAILog();
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
     const crosswayaiTempDir = path.join(crosswayaiDir, 'temp');
 
@@ -241,7 +289,7 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
             return;
         }
     }
-    const runtimeDLC = getRuntimeDLC(oeversion, vscode, CrossWayAILog);
+    const runtimeDLC = getRuntimeDLC(oeversion, CrossWayAILog);
     if (!runtimeDLC) {
         vscode.window.showErrorMessage(`CrossWayAI: No runtime path configured for OpenEdge version ${oeversion}. Please configure abl.configuration.runtimes in your settings.`);
         return;
@@ -299,6 +347,94 @@ function toMermaidNodeId(value) {
 
 function getDsMapArray(dsMap, tableName) {
     return (((dsMap || {}).dsMap || {})[tableName]) || [];
+}
+
+function normalizeFsPath(fsPath) {
+    return path.normalize(String(fsPath || '')).toLowerCase();
+}
+
+function getDsMapPath(workspaceRoot) {
+    return path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
+}
+
+function getDsMapJsonObject(suppressMissingFileMessage = false) {
+    const CrossWayAILog = getCrossWayAILog();
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+        return null;
+    }
+
+    const dsMapPath = getDsMapPath(workspaceRoot);
+
+    if (!fs.existsSync(dsMapPath)) {
+        if (!suppressMissingFileMessage && vscode && vscode.window && typeof vscode.window.showErrorMessage === 'function') {
+            vscode.window.showErrorMessage('CrossWayAI: dsMap.json not found. Please generate the map first.');
+        }
+        return null;
+    }
+
+    const dsMapContent = fs.readFileSync(dsMapPath, 'utf8');
+    return JSON.parse(dsMapContent);
+}
+
+function findDsMapFileEntry(dsMap, sourceFilePath) {
+    const tables = ((dsMap || {}).dsMap || {});
+    const files = []
+        .concat(tables.ttFile || [])
+        .concat(tables.ttFileNode || []);
+    const normalizedSource = normalizeFsPath(sourceFilePath);
+    return files.find(file => normalizeFsPath(file.filePath || file.FilePath) === normalizedSource) || null;
+}
+
+function resolveXrefFilePath(sourceFilePath, workspaceRoot, deps = {}) {
+    const CrossWayAILog = getCrossWayAILog();
+    if (!sourceFilePath || !workspaceRoot) {
+        return null;
+    }
+
+    const dsMapJson = getDsMapJsonObject();
+    const fileEntry = findDsMapFileEntry(dsMapJson, sourceFilePath);
+    if (!fileEntry) {
+        return null;
+    }
+
+    const projectName = String(fileEntry.project || fileEntry.Project || '').trim();
+    const sourceName = String(fileEntry.source || fileEntry.Source || '').trim();
+    const projectRoot = projectName ? path.join(workspaceRoot, projectName) : workspaceRoot;
+    const sourceRoot = sourceName ? path.join(projectRoot, sourceName) : projectRoot;
+    const relativeSourcePath = path.relative(sourceRoot, sourceFilePath);
+
+    if (!relativeSourcePath || relativeSourcePath.startsWith('..') || path.isAbsolute(relativeSourcePath)) {
+        return null;
+    }
+
+    const builderDir = path.join(projectRoot, '.builder');
+    if (!fs.existsSync(builderDir)) {
+        return null;
+    }
+
+    let pctDirs = [];
+    try {
+        pctDirs = fs.readdirSync(builderDir, { withFileTypes: true })
+            .filter(entry => entry.isDirectory() && /^\.pct\d+$/i.test(entry.name))
+            .map(entry => entry.name)
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    } catch (error) {
+        if (CrossWayAILog) {
+            CrossWayAILog.appendLine(`Failed to inspect .builder directory for XREF lookup: ${error.message}`);
+        }
+        return null;
+    }
+
+    for (const pctDir of pctDirs) {
+        const candidate = path.join(builderDir, pctDir, `${relativeSourcePath}.xref`);
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return null;
 }
 
 function buildNodeDatabaseDetails(dsMap) {
@@ -804,7 +940,7 @@ function matchesRelationshipType(link, relationshipTypes) {
 }
 
 function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options = {}) {
-    const { vscode, getDsMapArray } = deps;
+    const { getDsMapArray } = deps;
     const {
         graphType = 'LR',
         diagramTypeName = '',
@@ -862,7 +998,8 @@ function prependSourceMetadata(graph, targetNode) {
 }
 
 function resolveDiagramContext(context, uri, deps) {
-    const { vscode, fs, path, getDsMapArray } = deps;
+    const { getDsMapArray } = deps;
+    const CrossWayAILog = getCrossWayAILog();
     let filePath = '';
 
     if (uri && uri.fsPath) {
@@ -876,25 +1013,18 @@ function resolveDiagramContext(context, uri, deps) {
         filePath = editor.document.uri.fsPath;
     }
 
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
         return null;
     }
 
-    const workspaceRoot = resolveWorkspaceRoot(workspaceFolders);
-    const dsMapPath = path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
-
-    if (!fs.existsSync(dsMapPath)) {
-        vscode.window.showErrorMessage('CrossWayAI: dsMap.json not found. Please generate the map first.');
+    const dsMapJson = getDsMapJsonObject();
+    if (!dsMapJson) {
         return null;
     }
 
-    const dsMapContent = fs.readFileSync(dsMapPath, 'utf8');
-    const dsMap = JSON.parse(dsMapContent);
-
-    const fileNodes = getDsMapArray(dsMap, 'ttFileNode');
-    const fileLinks = getDsMapArray(dsMap, 'ttFileLink');
+    const fileNodes = getDsMapArray(dsMapJson, 'ttFileNode');
+    const fileLinks = getDsMapArray(dsMapJson, 'ttFileLink');
 
     if (fileNodes.length === 0 || fileLinks.length === 0) {
         vscode.window.showWarningMessage('CrossWayAI: dsMap.json is missing required relationship information. Regenerate the map first.');
@@ -910,7 +1040,7 @@ function resolveDiagramContext(context, uri, deps) {
 
     return {
         workspaceRoot,
-        dsMap,
+        dsMap: dsMapJson,
         targetNode
     };
 }
@@ -963,7 +1093,8 @@ function getDiagramConfig(diagramType) {
 }
 
 async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
-    const { vscode, CrossWayAILog, openCrosswayAIViewer, persistMermaid, getDsMapArray, path } = deps;
+    const { openCrosswayAIViewer, persistMermaid, getDsMapArray } = deps;
+    const CrossWayAILog = getCrossWayAILog();
     let config;
     try {
         config = getDiagramConfig(diagramType);
@@ -981,7 +1112,7 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
         }
 
         const { dsMap, targetNode, workspaceRoot } = resolvedContext;
-        const mermaidGraph = graphBuilder(dsMap, targetNode, { vscode, getDsMapArray, workspaceRoot, path });
+        const mermaidGraph = graphBuilder(dsMap, targetNode, { getDsMapArray, workspaceRoot });
 
         if (!mermaidGraph) {
             return;
@@ -1282,6 +1413,8 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 module.exports = {
     getProjectOEVersion,
     getRuntimeDLC,
+    normalizeConfigValue,
+    getWorkspaceRoot,
     resolveWorkspaceRoot,
     resolveProjectRootFromName,
     resolveDiagramContext,
@@ -1289,7 +1422,11 @@ module.exports = {
     generateDiagram,
     runABLScript,
     toMermaidNodeId,
+    getDsMapPath,
+    getDsMapJsonObject,
     getDsMapArray,
+    findDsMapFileEntry,
+    resolveXrefFilePath,
     buildNodeDatabaseDetails,
     getFirstLinkTypeEntry,
     parseInvokeRunSignature,
@@ -1304,5 +1441,6 @@ module.exports = {
     prependEdgeDetailsMetadata,
     parseNamedRelationLabel,
     generateMermaidRelationshipChainGraph,
-    cleanupDirectory
+    cleanupDirectory,
+    getCrosswayAISettingsJson
 };
