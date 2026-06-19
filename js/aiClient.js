@@ -1,9 +1,8 @@
-const fs = require('fs');
 const http = require('http');
 const https = require('https');
-const path = require('path');
 const vscode = require('vscode');
-const { getWorkspaceRoot, normalizeConfigValue, getCrosswayAISettingsJson } = require('./diagramCommon');
+const { normalizeConfigValue, getWorkspaceRoot } = require('./workspaceProjects');
+const { getCrosswayAISettings } = require('./crosswayaiSettings');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 const LOG_PREVIEW_LIMIT = 500;
@@ -38,22 +37,16 @@ function normalizeBaseUrl(baseUrl) {
         .replace(/\/+$/, '');
 }
 
-// Reads only the AI block from workspace-level settings.
-function getAISettings(workspaceRoot) {
-    const parsed = getCrosswayAISettingsJson(workspaceRoot);
-
-    return parsed?.ai || null;
-}
 
 // Produces the normalized config shape consumed by createAIClient.
 function getAIConfig() {
     const workspaceRoot = getWorkspaceRoot();
-    const workspaceAI = getAISettings(workspaceRoot);
-    const httpConfig = workspaceAI?.http || {};
+    const workspaceAISettings = getCrosswayAISettings(workspaceRoot);
+    const httpConfig = workspaceAISettings?.http || {};
 
     return {
-        enabled: workspaceAI?.enabled === true,
-        provider: normalizeConfigValue(workspaceAI?.provider),
+        enabled: workspaceAISettings?.enabled === true,
+        provider: normalizeConfigValue(workspaceAISettings?.provider),
         baseUrl: normalizeBaseUrl(httpConfig.baseUrl),
         apiKey: normalizeConfigValue(httpConfig.apiKey),
         model: normalizeConfigValue(httpConfig.model)
@@ -320,7 +313,6 @@ async function createAIClient() {
 }
 
 module.exports = {
-    getAISettings,
     getAIConfig,
     createHttpAIClient,
     createVSCodeAIClient,

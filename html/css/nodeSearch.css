@@ -1,14 +1,14 @@
     .search-box {
-      display: flex;
+      position: relative;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
     }
     #nodeSearch {
       background: rgba(15, 23, 42, 0.8);
       border: 1px solid #4b5563;
       border-radius: 6px;
       color: #e5e7eb;
-      padding: 5px 8px;
+      padding: 5px 28px 5px 8px;
       font-size: 13px;
       width: 160px;
       outline: none;
@@ -20,8 +20,11 @@
       color: #6b7280;
     }
     #searchCount {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
       color: #9ca3af;
       font-size: 11px;
-      min-width: 0;
-      text-align: center;
+      pointer-events: none;
     }

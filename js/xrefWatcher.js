@@ -1,123 +1,183 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { runABLScript, getWorkspaceRoot, getDsMapPath, cleanupDirectory } = require('./diagramCommon');
+const { runABLScript, cleanupDirectory } = require('./diagramCommon');
+const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
+const { getWorkspaceRoot, buildDsMapFileEntry } = require('./workspaceProjects');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { setAnalysisRunning, getAnalysisRunning } = require('./analysisState');
+const { mapXrefToSourceInfo } = require('./xrefSourceMap');
+const { refreshActiveMermaidDiagram } = require('./mermaidRefreshState');
 
-let isAnalysisRunning = false;
-
-function setAnalysisRunning(value) {
-    isAnalysisRunning = value;
-}
-
-function getAnalysisRunning() {
-    return isAnalysisRunning;
-}
-
-function setupXrefWatcher(context, deps) {
-    const CrossWayAILog = getCrossWayAILog();
-
+function setupXrefWatcher(context) {
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) return;
 
-    const dsMapPath = getDsMapPath(workspaceRoot);
-
-    const watcher = vscode.workspace.createFileSystemWatcher('**/.builder/**/*.xref');
+    const watcherPattern = new vscode.RelativePattern(workspaceRoot, '**/.builder/**/*.xref');
+    const watcher = vscode.workspace.createFileSystemWatcher(watcherPattern, false, false, false);
     let changedXrefs = new Set();
+    let deletedXrefs = new Set();
     let debounceTimer = null;
+    const CrossWayAILog = getCrossWayAILog();
 
-    const handleXrefChange = (uri) => {
-        if (isAnalysisRunning) return;
+    CrossWayAILog.appendLine(`XREF watcher active.`);
 
-        changedXrefs.add(uri.fsPath);
+    const takeCurrentBatches = () => {
+        const changedBatch = changedXrefs;
+        const deletedBatch = deletedXrefs;
+        changedXrefs = new Set();
+        deletedXrefs = new Set();
+        debounceTimer = null;
+        return { changedBatch, deletedBatch };
+    };
+
+    const handleXrefChange = (uri, changeType = 'change') => {
+        const xrefPath = uri.fsPath;
+        if (changeType === 'delete') {
+            deletedXrefs.add(xrefPath);
+            changedXrefs.delete(xrefPath);
+        } else {
+
+            changedXrefs.add(xrefPath);
+            deletedXrefs.delete(xrefPath);
+        }
 
         if (debounceTimer) {
             clearTimeout(debounceTimer);
         }
 
         debounceTimer = setTimeout(async () => {
-            const batch = changedXrefs;
-            changedXrefs = new Set();
-            debounceTimer = null;
-            await processChangedXrefs(context, workspaceRoot, dsMapPath, batch, deps);
+            if (getAnalysisRunning()) {
+                // Keep batched changes and retry after the current analysis cycle.
+                debounceTimer = setTimeout(async () => {
+                    const { changedBatch: retryChangedBatch, deletedBatch: retryDeletedBatch } = takeCurrentBatches();
+                    await processChangedXrefs(context, workspaceRoot, retryChangedBatch, retryDeletedBatch);
+                }, 2000);
+                return;
+            }
+
+            const { changedBatch, deletedBatch } = takeCurrentBatches();
+            await processChangedXrefs(context, workspaceRoot, changedBatch, deletedBatch);
         }, 2000);
     };
 
-    watcher.onDidChange(handleXrefChange);
-    watcher.onDidCreate(handleXrefChange);
+    const onChangeDisposable = watcher.onDidChange((uri) => {
+        CrossWayAILog.appendLine(`XREF updated: ${uri.fsPath}`);
+        handleXrefChange(uri, 'change');
+    });
+    const onCreateDisposable = watcher.onDidCreate((uri) => {
+        CrossWayAILog.appendLine(`XREF created: ${uri.fsPath}`);
+        handleXrefChange(uri, 'create');
+    });
+    const onDeleteDisposable = watcher.onDidDelete((uri) => {
+        CrossWayAILog.appendLine(`XREF deleted: ${uri.fsPath}`);
+        handleXrefChange(uri, 'delete');
+    });
 
     context.subscriptions.push(watcher);
+    context.subscriptions.push(onChangeDisposable, onCreateDisposable, onDeleteDisposable);
 }
 
-function mapXrefToSourceFile(xrefPath, dsMapPath, deps) {
-    if (!fs.existsSync(dsMapPath)) return null;
-
-    const builderMatch = xrefPath.match(/^(.+?)[\\\/]\.builder[\\\/]\.pct\d+[\\\/](.+)\.xref$/i);
-    if (!builderMatch) return null;
-
-    const projectRoot = builderMatch[1];
-    const relPath = builderMatch[2].replace(/\//g, path.sep);
-
-    try {
-        const data = JSON.parse(fs.readFileSync(dsMapPath, 'utf8'));
-        const ttFile = (data.dsMap && data.dsMap.ttFile) || [];
-
-        for (const file of ttFile) {
-            if (!file.filePath.startsWith(projectRoot + path.sep)) continue;
-            if (file.filePath.endsWith(path.sep + relPath)) {
-                return file.filePath;
-            }
-        }
-    } catch (e) { /* ignore parse errors */ }
-
-    return null;
-}
-
-async function processChangedXrefs(context, workspaceRoot, dsMapPath, changedXrefs, deps) {
+async function processChangedXrefs(context, workspaceRoot, changedXrefs, deletedXrefs) {
     const CrossWayAILog = getCrossWayAILog();
+    const dsMapPath = getDsMapPath(workspaceRoot);
 
     if (!fs.existsSync(dsMapPath)) {
         CrossWayAILog.appendLine('Incremental update skipped: dsMap.json not found. Run full analysis first.');
         return;
     }
 
+    const dsMapJson = getDsMapJsonObject(workspaceRoot, true);
+    if (!dsMapJson) {
+        CrossWayAILog.appendLine('Incremental update skipped: failed to parse dsMap.json.');
+        return;
+    }
+
+    if (!dsMapJson.dsMap || typeof dsMapJson.dsMap !== 'object') {
+        dsMapJson.dsMap = {};
+    }
+    if (!Array.isArray(dsMapJson.dsMap.ttFile)) {
+        dsMapJson.dsMap.ttFile = [];
+    }
+
+    let dsMapUpdated = false;
+
     const changedFilePathsSet = new Set();
+    const deletedFilePathsSet = new Set();
     for (const xrefPath of changedXrefs) {
-        const filePath = mapXrefToSourceFile(xrefPath, dsMapPath, deps);
-        if (filePath) {
-            changedFilePathsSet.add(filePath);
+        const mapped = mapXrefToSourceInfo(xrefPath, dsMapJson);
+        if (!mapped || !mapped.filePath) {
+            continue;
+        }
+
+        changedFilePathsSet.add(mapped.filePath);
+
+        if (mapped.isNewDsMapEntry) {
+            const normalizedMappedPath = normalizeFsPath(path.resolve(String(mapped.filePath || '')));
+            const alreadyExists = dsMapJson.dsMap.ttFile.some(file => normalizeFsPath(path.resolve(String(file.filePath || ''))) === normalizedMappedPath);
+            if (!alreadyExists) {
+                dsMapJson.dsMap.ttFile.push(buildDsMapFileEntry(mapped.projectRoot, mapped.sourceRoot, mapped.filePath, path.relative(workspaceRoot, mapped.projectRoot) || ''));
+                dsMapUpdated = true;
+            }
+        }
+    }
+
+    for (const xrefPath of deletedXrefs) {
+        const mapped = mapXrefToSourceInfo(xrefPath, dsMapJson, { allowMissingSourceFile: true });
+        if (mapped && mapped.filePath) {
+            deletedFilePathsSet.add(mapped.filePath);
         }
     }
 
     const changedFilePaths = [...changedFilePathsSet];
-    if (changedFilePaths.length === 0) return;
+    const deletedFilePaths = [...deletedFilePathsSet];
+    if (changedFilePaths.length === 0 && deletedFilePaths.length === 0) {
+        CrossWayAILog.appendLine(`Incremental update skipped: no source mapping found for ${changedXrefs.size + deletedXrefs.size} changed/deleted xref file(s).`);
+        return;
+    }
 
-    CrossWayAILog.appendLine(`Incremental update for ${changedFilePaths.length} file(s): ${changedFilePaths.join(', ')}`);
+    if (dsMapUpdated) {
+        try {
+            fs.writeFileSync(dsMapPath, JSON.stringify(dsMapJson, null, 2), 'utf8');
+            CrossWayAILog.appendLine('Incremental update: dsMap.json updated with new source file entries before analysis.');
+        } catch (error) {
+            CrossWayAILog.appendLine(`Incremental update skipped: failed to write dsMap.json (${error.message}).`);
+            return;
+        }
+    }
+
+    CrossWayAILog.appendLine(`Incremental update for ${changedFilePaths.length} changed and ${deletedFilePaths.length} deleted file(s).`);
+    if (changedFilePaths.length > 0) {
+        CrossWayAILog.appendLine(`Changed: ${changedFilePaths.join(', ')}`);
+    }
+    if (deletedFilePaths.length > 0) {
+        CrossWayAILog.appendLine(`Deleted: ${deletedFilePaths.join(', ')}`);
+    }
     CrossWayAILog.show(true);
 
     try {
-        isAnalysisRunning = true;
-        const extraArgs = ['-param', JSON.stringify({ workspaceRoot, changedFiles: changedFilePaths.join(',') })];
-        await runABLScript({ context, workspaceRoot, deps, scriptName: 'core/runIncrementalAnalysis.p', args: extraArgs });
+        setAnalysisRunning(true);
+        const extraArgs = ['-param', JSON.stringify({
+            workspaceRoot,
+            changedFiles: changedFilePaths.join(','),
+            deletedFiles: deletedFilePaths.join(',')
+        })];
+        await runABLScript({ context, workspaceRoot, scriptName: 'core/runIncrementalAnalysis.p', args: extraArgs });
 
         const tempDir = path.join(workspaceRoot, '.crosswayai/temp');
         await cleanupDirectory(tempDir);
 
         CrossWayAILog.appendLine('Incremental analysis complete.\n');
-        if (typeof deps.refreshActiveMermaidDiagram === 'function') {
-            await deps.refreshActiveMermaidDiagram(context);
-        }
+        await refreshActiveMermaidDiagram(context);
         CrossWayAILog.show(true);
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental analysis error: ${error.message}`);
         CrossWayAILog.show(true);
     } finally {
-        isAnalysisRunning = false;
+        setAnalysisRunning(false);
     }
 }
 
 module.exports = {
-    setupXrefWatcher,
-    setAnalysisRunning,
-    getAnalysisRunning
+    setupXrefWatcher
 };

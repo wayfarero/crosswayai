@@ -8,11 +8,11 @@ const {
     renderSortedEdges
 } = require('./diagramCommon');
 
-async function generateInheritanceDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'inheritance', generateMermaidInheritanceGraph);
+async function generateInheritanceDiagram(context, uri) {
+    return generateDiagram(context, uri, 'inheritance', generateMermaidInheritanceGraph);
 }
 
-function generateMermaidInheritanceGraph(dsMap, targetNode, deps, graphType = 'BT') {
+function generateMermaidInheritanceGraph(dsMap, targetNode, graphType = 'BT') {
     const allFileLinks = dsMap.dsMap.ttFileLink || [];
     const allFileNodes = dsMap.dsMap.ttFileNode || [];
     const startNodeId = targetNode.NodeId;

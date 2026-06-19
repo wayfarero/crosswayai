@@ -8,11 +8,11 @@ const {
     renderSortedEdges
 } = require('./diagramCommon');
 
-async function generateInterfaceDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'interface', generateMermaidInterfaceGraph);
+async function generateInterfaceDiagram(context, uri) {
+    return generateDiagram(context, uri, 'interface', generateMermaidInterfaceGraph);
 }
 
-function generateMermaidInterfaceGraph(dsMap, targetNode, deps, graphType = 'LR') {
+function generateMermaidInterfaceGraph(dsMap, targetNode, graphType = 'LR') {
     const allFileLinks = dsMap.dsMap.ttFileLink || [];
     const allFileNodes = dsMap.dsMap.ttFileNode || [];
     const startNodeId = targetNode.NodeId;

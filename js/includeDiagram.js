@@ -3,12 +3,12 @@ const {
     generateMermaidRelationshipChainGraph
 } = require('./diagramCommon');
 
-async function generateIncludeDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'include', generateMermaidIncludeGraph);
+async function generateIncludeDiagram(context, uri) {
+    return generateDiagram(context, uri, 'include', generateMermaidIncludeGraph);
 }
 
-function generateMermaidIncludeGraph(dsMap, targetNode, deps, graphType = 'TD') {
-    return generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, {
+function generateMermaidIncludeGraph(dsMap, targetNode, graphType = 'TD') {
+    return generateMermaidRelationshipChainGraph(dsMap, targetNode, {
         graphType,
         diagramTypeName: 'include',
         relationshipTypes: ['include']

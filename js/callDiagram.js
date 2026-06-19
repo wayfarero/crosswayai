@@ -6,16 +6,17 @@ const {
     buildLinkEdgeMap,
     renderSortedEdges,
     prependEdgeDetailsMetadata,
-    getInvokeRunDisplayLabel,
-    getFirstLinkTypeEntry
+    getDsMapArray
 } = require('./diagramCommon');
+const {
+    edgeDetailLabelExtractor
+} = require('./edgeInfo');
 
-async function generateCallDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'call', generateMermaidCallGraph);
+async function generateCallDiagram(context, uri) {
+    return generateDiagram(context, uri, 'call', generateMermaidCallGraph);
 }
 
-function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
-    const { getDsMapArray } = deps;
+function generateMermaidCallGraph(dsMap, targetNode, graphType = 'LR') {
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
     const startNodeId = targetNode.NodeId;
@@ -53,18 +54,13 @@ function generateMermaidCallGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
-    function extractCallLabel(link) {
-        const rawLinkType = typeof link.LinkType === 'string' ? link.LinkType : '';
-        const invokeRunLabel = getInvokeRunDisplayLabel(rawLinkType);
-        if (invokeRunLabel) {
-            return invokeRunLabel;
-        }
-        return getFirstLinkTypeEntry(rawLinkType, { toLowerCase: false });
-    }
+
 
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
-        includeLabels: true,
-        labelExtractor: extractCallLabel
+        includeLabels: false, // Do not show labels on the diagram
+        // labelExtractor is omitted since labels are not shown
+        includeDetailLabels: true,
+        detailLabelExtractor: edgeDetailLabelExtractor
     });
 
     renderSortedEdges(edges, addEdge);

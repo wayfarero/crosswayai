@@ -1,7 +1,6 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
 const { generateDependencyMap } = require('./dependencyMap');
 const { setupXrefWatcher } = require('./xrefWatcher');
 const { generateIncludeDiagram } = require('./includeDiagram');
@@ -15,18 +14,17 @@ const { generatePropertyAccessDiagram } = require('./propertyAccessDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
 const { createMermaidViewer } = require('./crosswayaiContainer');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
-const { getWorkspaceRoot } = require('./diagramCommon');
-const { openXrefFile } = require('./fileHandling');
+const { getWorkspaceRoot } = require('./workspaceProjects');
+const { openXrefFile, openProparseFile } = require('./fileHandling');
+const { proparseAllProjects } = require('./proparseRunner');
+const { ensureProparserCompiled } = require('./proparseContext');
 const { setCrossWayAILog } = require('./crosswayaiLogger');
-
-const KNOWN_OE_VERSIONS = ['11.7', '12.8'];
+const { setRefreshActiveMermaidDiagramHandler } = require('./mermaidRefreshState');
 
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
 setCrossWayAILog(CrossWayAILog);
-const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible } = createMermaidViewer({
-    http,
-});
+const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible } = createMermaidViewer();
 
 let activeGeneratedDiagram = null;
 
@@ -77,6 +75,12 @@ function activate(context) {
     // Ensure default settings file exists
     ensureDefaultExtensionSettings(context);
 
+    const proparserCompilePromise = ensureProparserCompiled(context).catch(error => {
+        CrossWayAILog.appendLine(`>Proparse: Unexpected Proparser compile check error: ${error.message}`);
+        CrossWayAILog.show(true);
+        return false;
+    });
+
     async function refreshActiveMermaidDiagram() {
         if (!activeGeneratedDiagram) {
             return;
@@ -94,31 +98,30 @@ function activate(context) {
         }
     }
 
-    const getDiagramDeps = () => ({
-        openCrosswayAIViewer,
-        persistMermaid,
-        getDsMapArray,
-        knownOEVersions: KNOWN_OE_VERSIONS
-    });
+    setRefreshActiveMermaidDiagramHandler(refreshActiveMermaidDiagram);
 
-    const getCommonDeps = () => ({
-        refreshActiveMermaidDiagram,
-        knownOEVersions: KNOWN_OE_VERSIONS
-    });
-
-    const handleDependencyMap = (ctx) => generateDependencyMap(ctx, getCommonDeps());
-    const handleImpactDiagram = (ctx, uri) => generateImpactDiagram(ctx, uri, getDiagramDeps());
-    const handleIncludeDiagram = (ctx, uri) => generateIncludeDiagram(ctx, uri, getDiagramDeps());
-    const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri, getDiagramDeps());
-    const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri, getDiagramDeps());
-    const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri, getDiagramDeps());
-    const handlePackageDiagram = (ctx, uri) => generatePackageDiagram(ctx, uri, getDiagramDeps());
-    const handleInstanceChainDiagram = (ctx, uri) => generateInstanceChainDiagram(ctx, uri, getDiagramDeps());
-    const handlePropertyAccessDiagram = (ctx, uri) => generatePropertyAccessDiagram(ctx, uri, getDiagramDeps());
-    const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri, getCommonDeps());
-    const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, getCommonDeps(), dbName, workspaceRoot, pfFilePath);
-    const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx, getCommonDeps());
-    const handleOpenXrefFile = (ctx, uri) => openXrefFile(ctx, uri);
+    const handleDependencyMap = (ctx) => generateDependencyMap(ctx);
+    const handleImpactDiagram = (ctx, uri) => generateImpactDiagram(ctx, uri);
+    const handleIncludeDiagram = (ctx, uri) => generateIncludeDiagram(ctx, uri);
+    const handleInterfaceDiagram = (ctx, uri) => generateInterfaceDiagram(ctx, uri);
+    const handleCallDiagram = (ctx, uri) => generateCallDiagram(ctx, uri);
+    const handleInheritanceDiagram = (ctx, uri) => generateInheritanceDiagram(ctx, uri);
+    const handlePackageDiagram = (ctx, uri) => generatePackageDiagram(ctx, uri);
+    const handleInstanceChainDiagram = (ctx, uri) => generateInstanceChainDiagram(ctx, uri);
+    const handlePropertyAccessDiagram = (ctx, uri) => generatePropertyAccessDiagram(ctx, uri);
+    const handleTableRelationsDiagram = (ctx, uri) => generateTableRelationsDiagram(ctx, uri);
+    const handleDumpDfFile = (ctx, dbName, workspaceRoot, pfFilePath) => dumpDfFile(ctx, dbName, workspaceRoot, undefined, pfFilePath);
+    const handleDumpAllDBDefinitions = (ctx) => dumpAllDBDefinitions(ctx);
+    const handleProparseAllProjects = async (ctx) => {
+        const proparserReady = await proparserCompilePromise;
+        if (!proparserReady) {
+            vscode.window.showErrorMessage('CrossWayAI: Proparser is not compiled. See CrossWayAILog for details.');
+            return;
+        }
+        await proparseAllProjects(ctx);
+    };
+    const handleOpenXrefFile = (ctx, uri) => openXrefFile(uri);
+    const handleOpenProparseFile = (ctx, uri) => openProparseFile(uri);
 
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
@@ -134,10 +137,12 @@ function activate(context) {
         { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram, trackDiagram: true },
         { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram, trackDiagram: true },
         { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram, trackDiagram: true },
-        { name: 'crosswayai.openXrefFile', handler: handleOpenXrefFile }
+        { name: 'crosswayai.proparseAllProjects', handler: handleProparseAllProjects },
+        { name: 'crosswayai.openXrefFile', handler: handleOpenXrefFile },
+        { name: 'crosswayai.openProparseFile', handler: handleOpenProparseFile }
     ];
 
-    setupXrefWatcher(context, getCommonDeps());
+    setupXrefWatcher(context);
 
     commands.forEach(command => {
         let disposableCommand;
@@ -164,17 +169,8 @@ function activate(context) {
 
 }
 
-
-function getDsMapArray(dsMap, key) {
-    if (!dsMap || typeof dsMap !== 'object' || !dsMap.dsMap || typeof dsMap.dsMap !== 'object') {
-        return [];
-    }
-
-    const value = dsMap.dsMap[key];
-    return Array.isArray(value) ? value : [];
-}
-
 function deactivate() {
+    setRefreshActiveMermaidDiagramHandler(null);
     deactivateMermaidViewer();
 }
 

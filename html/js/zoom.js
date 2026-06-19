@@ -52,8 +52,9 @@
       if (!svgBaseWidth || !svgBaseHeight) {
         return;
       }
-      const availableWidth = Math.max(120, stage.clientWidth - 36);
-      const availableHeight = Math.max(120, stage.clientHeight - 36);
+      const viewportPadding = 72;
+      const availableWidth = Math.max(120, stage.clientWidth - viewportPadding);
+      const availableHeight = Math.max(120, stage.clientHeight - viewportPadding);
       const fitZoom = Math.min(availableWidth / svgBaseWidth, availableHeight / svgBaseHeight);
       applyZoom(fitZoom, true);
     }
@@ -131,7 +132,7 @@
           }
         }
 
-        if (typeof isTableRelationsDiagram === 'function' && isTableRelationsDiagram(defaultMarkdownPath)) {
+        if (typeof isTableRelationsDiagram === 'function' && isTableRelationsDiagram(mermaidMarkdownFilePath)) {
           centerStageScroll();
         }
       });

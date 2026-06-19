@@ -5,8 +5,10 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 ## Features
 
 - **Automated Project Analysis:** Scans your OpenEdge ABL project to discover all source files (`.p`, `.w`, `.cls`, `.i`).
-- **Multi-Project Workspace Support:** Supports workspaces containing multiple OpenEdge projects.
+- **Windows/Unix support:** Supports both types of operation systems VSCode workspaces
+- **Single/Multi-Project Workspace Support:** Supports workspaces containing either single or multiple OpenEdge projects.
 - **Dependency Mapping:** Triggers a deep analysis using an underlying ABL script to generate a dependency map.
+- **Proparse Support** Integrated [Proparse](https://github.com/consultingwerk/proparse) support to enable more complex code analysis in later releases
 - **Context Menu Integration:** Access diagram generation commands directly from the editor or explorer context menus for quick analysis.
 - **AI support integration:** Several Diagram functionalities are handled via existing AI tooling (vscode / html): Table Relations Diagram, node functional description etc.
 - **Multiple Diagram Types:** Provides commands to generate various diagrams to visualize your application's architecture, including:
@@ -22,19 +24,20 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 
 ## Requirements
 
-- Progress OpenEdge 11.7 - 12.8 installation.
+- [Progress OpenEdge](https://www.progress.com/openedge) 11.7 - 12.8 installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension (installed automatically with CrossWayAI)
-- Windows support only (for now)
+- Java [JDK](https://www.oracle.com/java/technologies/downloads/) installation (needed by Proparse to run)
 - Workspace configuration file (`.code-workspace`) present in the workspace root folder, next to the workspace project folders
 
 ## AI Configuration
 
 In order to use the integrated AI support you need to set the AI enabled = true (disabled by default)
-
 CrossWayAI supports both external AI providers (OpenAI-compatible APIs) and VS Code Language Models.
-
 For detailed setup instructions, see: [AI Configuration Guide](./resources/AI_CONFIGURATION.md)
 
+## Java Configuration
+
+To use Proparse support, you need to have a correctly installed and configured JDK in the PATH environment variable. This is mandatory for the Proparse functionalities to be available.
 
 ## Before You Start
 
@@ -56,10 +59,18 @@ For detailed setup instructions, see: [AI Configuration Guide](./resources/AI_CO
 
 5.  Run the **"CrossWayAI: Dump All DB Definitions"** command
     - This will dump all databases configured in the openedge-project.json under the `.crosswayai\dump` directory in your workspace root.
-
 ![Dump All DB Definitions](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/dumpalldbdefinitions.gif)
 
-Once the analysis is complete, you can use the other commands to generate specific diagrams.
+6. (optionally) run the **"CrossWayAI: Proparse All Projects"** command
+    - This will output corresponding proparse files of all workspace ABL files under the `.crosswayai\proparse` directory in your workspace root.
+
+Once the analysis is complete, you can use the other commands to generate specific diagrams or to view the corresponding XREF or Proparse content of an ABL file.
+
+## Diagram Exclusions
+
+You can hide specific files or folders from generated diagrams by adding paths to the `excludes` array in `.crosswayai/crosswayai_settings.json`.
+
+For detailed setup instructions, see: [Diagram Exclusions Guide](./resources/DIAGRAM_EXCLUSIONS.md)
 
 ## Extension Commands
 
@@ -68,6 +79,7 @@ The following commands are available in the Command Palette :
 -   `CrossWayAI: Generate Dependency Map`: The primary command to kick off the full analysis of the workspace projects' files.
 -   `CrossWayAI: Dump All DB Definitions`: Helper command to dump the current workspace databases schema definition files in order to 
 enable users to generate table relationship diagrams using the chat agent.
+-   `CrossWayAI: Proparse All Projects`: (optional) Helper command to output proparse files for the whole workspace
 
 and via context menus:
     
@@ -84,6 +96,7 @@ and via context menus:
     
 - `File`:
     - `XREF`: Open the corresponding XREF file for the selected file.
+    - `PROPARSE`: Open the corresponding Proparse file for the selected file.
 
 ![Impact Diagram](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/impactdiagram.gif)
 
@@ -97,17 +110,22 @@ and via context menus:
 
 ## Release Notes
 
-### 1.8.3
+### 1.9.0
   - Improvements: 
-    - introduced .crosswayai/crosswayai_settings.json default configuration file supporting ai settings; Table Relations diagram is restricted to use AI enabled = true.
-    - AI node summary tooltip functionality is now available on all file nodes on every type of file related diagrams
-    - reorganized CrossWayAI context menu, added new right-click context menu option to open the corresponding XREF file from the explorer, editor and `CrossWayAI Viewer`
-    - added automatic refresh of currently active `CrossWayAI Viewer` diagram on xref updates
-    - code refactoring for better maintainability
-  - Bug Fixes: 
-    - corrected pin tooltip behaviour for nodes and links; now possible to pin both a node DB access tooltip and a link tooltip at the same time
+    - **added UNIX support to the extension, all commands should work both under Windows and Unix operating system workspaces**
+    - added support to output the Proparse files of the whole workspace and menu command to view the proparse file content of a certain ABL file
+    - added support to handle .pl class references as well, showing the virtual nodes with a purple colour border
+    - added support for excluding certain files or complete folders from diagram generation. See `Diagram Exclusions` section above
+    - moved the file node search count inside the node search box in the `CrossWayAI Viewer`
+    - refactored link tooltip to show separate sections for Invoke, Run and Property 
+    - added double-click events on link tooltip and signature tooltip for quick navigation to the specific method, property or internal procedure
+    - code refactorings for better maintainability
+  - Bug Fixes:
+    - correction for `Export Image` functionality in `CrossWayAI Viewer`
+    - corrected automatic refresh of the `CrossWayAI Viewer` on every code base change that creates / deletes / updates an .xref file
+    - adjusted padding so that top-right file nodes are fully visible and locked the panel of the `CrossWayAI Viewer` so that opening other file will not hide the viewer.
+    - corrected AI summary tooltip copy button functionality 
     
-
 For the full release history, see the [CHANGELOG](./CHANGELOG.md).
 ---
 

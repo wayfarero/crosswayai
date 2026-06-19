@@ -1,7 +1,8 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { runABLScript, cleanupDirectory, getWorkspaceRoot, getProjectOEVersion, resolveProjectRootFromName } = require('./diagramCommon');
+const { runABLScript, cleanupDirectory } = require('./diagramCommon');
+const { getWorkspaceRoot, getProjectOEVersion, resolveProjectRootFromName } = require('./workspaceProjects');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 
 /**
@@ -47,14 +48,13 @@ function shouldResolveConnectString(connectString) {
 /**
  * Calls the dumpDfFile.p ABL script to dump the definition of a database file.
  * @param {object} context extension context object
- * @param {object} deps dependency injection object containing VS Code API, Node.js fs & path, and logging utilities 
  * @param {string} dbName  name of the database to dump
  * @param {string} workspaceRoot path of the workspace root directory
  * @param {string} projectName name of the project (used for logging and output file naming)
  * @param {string} pfFilePath path to the parameter file
  * @returns 
  */
-async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfFilePath) {
+async function dumpDfFile(context, dbName, workspaceRoot, projectName, pfFilePath) {
     const CrossWayAILog = getCrossWayAILog();
 
     // If projectName is not provided, use the workspace Root folder name as the project name
@@ -62,7 +62,7 @@ async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfF
         projectName = path.basename(workspaceRoot);
     }
 
-    const projectRoot = resolveProjectRootFromName(vscode.workspace, projectName, workspaceRoot) || workspaceRoot;
+    const projectRoot = resolveProjectRootFromName(projectName, workspaceRoot) || workspaceRoot;
     const oeversion = getProjectOEVersion(projectRoot);
 
     // Pass param and parameterFile as extra arguments
@@ -74,7 +74,7 @@ async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfF
     return runABLScript({
         context,
         workspaceRoot,
-        deps: { ...deps, oeversion },
+        oeversion,
         scriptName: 'core/dumpDfFile.p',
         args: extraArgs
     });
@@ -83,10 +83,9 @@ async function dumpDfFile(context, deps, dbName, workspaceRoot, projectName, pfF
 /**
  * Dumps the definitions of all databases in the workspace.
  * @param {object} context extension context object
- * @param {object} deps dependency injection object containing VS Code API, Node.js fs & path, and logging utilities
  * @returns {Promise<void>}
  */
-async function dumpAllDBDefinitions(context, deps) {
+async function dumpAllDBDefinitions(context) {
     const CrossWayAILog = getCrossWayAILog();
 
     // Create .crosswayai directory in project root folder
@@ -158,7 +157,7 @@ async function dumpAllDBDefinitions(context, deps) {
             if (dbName) {
                 CrossWayAILog.appendLine(`>Calling dumpDfFile for DB: ${dbName}`);
                 CrossWayAILog.show(true);
-                await dumpDfFile(context, deps, dbName, workspaceRoot, path.basename(projectRoot), pfFilePath);
+                await dumpDfFile(context, dbName, workspaceRoot, path.basename(projectRoot), pfFilePath);
             }
         }
         

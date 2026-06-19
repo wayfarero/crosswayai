@@ -15,6 +15,12 @@
         "class": "#0da33f",
         "include": "#ed1e97",
         "procedure": "#1d6be0",
-        "screen": "#e0781c"
+        "screen": "#e0781c",
+        "virtual": "#9333ea"
+    },
+    "labelTextColors": {
+        "projectName": "#f59e0b",
+        "referencedNodeSourceDirectory": "#f9a8d4",
+        "sourceDirectory": "#ec4899"
     }
 }

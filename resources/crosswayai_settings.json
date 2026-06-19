@@ -2,5 +2,6 @@
   "ai": {
     "enabled": false,
     "provider": "vscode"
-  }
+  },
+  "excludes": []
 }

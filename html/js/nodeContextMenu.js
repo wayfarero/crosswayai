@@ -1,9 +1,10 @@
-    const FILE_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 1h7l4 4v10H3V1z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M10 1v4h4" stroke="#9ca3af" stroke-width="1.2" fill="none"/></svg>';
-    const XREF_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 2.5h6l3 3v8h-9v-11z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M8.5 2.5v3h3" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M5 8h4M5 10.5h6" stroke="#9ca3af" stroke-width="1.2" stroke-linecap="round"/></svg>';
+    const FILE_ICON_SVG     = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 1h7l4 4v10H3V1z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M10 1v4h4" stroke="#9ca3af" stroke-width="1.2" fill="none"/></svg>';
+    const XREF_ICON_SVG     = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 2.5h6l3 3v8h-9v-11z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M8.5 2.5v3h3" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M5 8h4M5 10.5h6" stroke="#9ca3af" stroke-width="1.2" stroke-linecap="round"/></svg>';
+    const PROPARSE_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 2.5h6l3 3v8h-9v-11z" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M8.5 2.5v3h3" stroke="#9ca3af" stroke-width="1.2" fill="none"/><path d="M5.5 8v2.5M5.5 10.5h4M9.5 10.5v2" stroke="#9ca3af" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5.5" cy="7.5" r="1" stroke="#9ca3af" stroke-width="1.2"/><circle cx="5.5" cy="12.5" r="1" stroke="#9ca3af" stroke-width="1.2"/><circle cx="9.5" cy="12.5" r="1" stroke="#9ca3af" stroke-width="1.2"/></svg>';
 
     let hideNodeContextMenu = () => {};
 
-    function attachNodeContextMenu({ nodeContextMenu, allNodes, getNodeIdentity, openNodeFile, openNodeXrefFile, stage, onBeforeShow }) {
+    function attachNodeContextMenu({ nodeContextMenu, allNodes, getNodeIdentity, openNodeFile, openNodeXrefFile, openNodeProparseFile, stage, onBeforeShow }) {
       hideNodeContextMenu = function () {
         nodeContextMenu.hidden = true;
         nodeContextMenu.innerHTML = '';
@@ -49,6 +50,12 @@
             iconSvg: XREF_ICON_SVG,
             enabled: Boolean(filePath && openNodeXrefFile),
             onClick: () => openNodeXrefFile(nodeId)
+          },
+          {
+            label: 'Open Proparse File',
+            iconSvg: PROPARSE_ICON_SVG,
+            enabled: Boolean(filePath && openNodeProparseFile),
+            onClick: () => openNodeProparseFile(nodeId)
           }
         ];
 
@@ -80,7 +87,7 @@
           event.preventDefault();
           event.stopPropagation();
           const nodeId = getNodeIdentity(node);
-          if (!nodeId) return;
+          if (!nodeId || (window.CROSSWAY_VIRTUAL_NODES && window.CROSSWAY_VIRTUAL_NODES.has(nodeId))) return;
           if (typeof onBeforeShow === 'function') {
             onBeforeShow({ nodeId, event, node });
           }

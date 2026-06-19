@@ -272,7 +272,12 @@
 
     if (nodeSummaryPopover) {
       nodeSummaryPopover.addEventListener('click', async (event) => {
-        const copyButton = event.target.closest('.summary-copy');
+        
+        const clickTarget = event.target instanceof Element
+                          ? event.target
+                          : event.target && event.target.parentElement;
+
+        const copyButton = clickTarget?.closest('.summary-copy');
         if (!copyButton) {
           return;
         }
@@ -285,18 +290,45 @@
           return;
         }
 
+        let copySuccess = false;
+
+        // Fallback to older execCommand method for restricted iframe contexts
         try {
-          await navigator.clipboard.writeText(summaryText);
+          const textarea = document.createElement('textarea');
+          textarea.value = summaryText;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity  = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          const result = document.execCommand('copy');
+          document.body.removeChild(textarea);
+
+          if (result) {
+            copySuccess = true;
+          } else {
+            logger.logToOutput(`[NodeSummary] : copy action failed`); 
+          }
+        } catch (err) {
+            logger.logToOutput(`[NodeSummary] ERROR : copy action failed`);
+        }
+
+        // Update UI only if copy succeeded
+        if (copySuccess) {
           copyButton.textContent = '✓';
           copyButton.setAttribute('title', 'Copied');
+          copyButton.setAttribute('aria-label', 'Copied');
+
           setTimeout(() => {
             if (nodeSummaryPopover.contains(copyButton)) {
               copyButton.textContent = '⧉';
               copyButton.setAttribute('title', 'Copy summary');
+              copyButton.setAttribute('aria-label', 'Copy summary');
             }
           }, 1200);
-        } catch (_) {
+        } else {
+            logger.logToOutput(`[NodeSummary] : All copy methods failed`);
         }
+
       });
     }
 

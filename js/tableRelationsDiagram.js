@@ -2,10 +2,10 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { getAIConfig } = require('./aiClient');
-const { getWorkspaceRoot } = require('./diagramCommon');
+const { getWorkspaceRoot } = require('./workspaceProjects');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 
-function generateTableRelationsDiagram(ctx, uri, deps) {
+function generateTableRelationsDiagram(ctx, uri) {
     const CrossWayAILog = getCrossWayAILog();
 
     if (!uri || !uri.fsPath) {

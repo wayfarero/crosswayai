@@ -174,23 +174,14 @@
       let pinnedNodeTooltipAnchor = null;
       clearAllPinnedEdgeTooltips();
 
-      function openNodeFile(nodeId) {
+
+      function openNodeProparseFile(nodeId) { 
         const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
         if (!filePath) {
           return false;
         }
 
-        window.parent.postMessage({ type: 'openFile', filePath: filePath }, '*');
-        return true;
-      }
-
-      function openNodeXrefFile(nodeId) {
-        const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
-        if (!filePath) {
-          return false;
-        }
-
-        window.parent.postMessage({ type: 'openXrefFile', filePath: filePath }, '*');
+        window.parent.postMessage({ type: 'openProparseFile', filePath: filePath }, '*');
         return true;
       }
 
@@ -963,6 +954,7 @@
         getNodeIdentity,
         openNodeFile,
         openNodeXrefFile,
+        openNodeProparseFile,
         stage,
         onBeforeShow: () => {
           clearPinnedNodeTooltipState();
@@ -1201,6 +1193,17 @@
         } catch {
           window.CROSSWAY_FILE_MAP = {};
         }
+      }
+
+      const virtualNodesMatch = (code || '').match(/^\s*%%CROSSWAY_VIRTUAL_NODES:(.*)$/m);
+      if (virtualNodesMatch) {
+        try {
+          window.CROSSWAY_VIRTUAL_NODES = new Set(JSON.parse(virtualNodesMatch[1]));
+        } catch {
+          window.CROSSWAY_VIRTUAL_NODES = new Set();
+        }
+      } else {
+        window.CROSSWAY_VIRTUAL_NODES = new Set();
       }
 
       if (!mermaidCode) {

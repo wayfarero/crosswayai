@@ -6,12 +6,12 @@ const {
     toMermaidNodeId
 } = require('./diagramCommon');
 
-async function generatePackageDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'package', generateMermaidPackageGraph);
+
+async function generatePackageDiagram(context, uri) {
+    return generateDiagram(context, uri, 'package', generateMermaidPackageGraph);
 }
 
-function generateMermaidPackageGraph(dsMap, targetNode, deps) {
-    const { workspaceRoot } = deps;
+function generateMermaidPackageGraph(dsMap, targetNode, workspaceRoot) {
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
     const workspaceProjectName = workspaceRoot ? path.basename(workspaceRoot) : 'Project';
 
@@ -64,6 +64,8 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     if (classNodes.length === 0) {
         classNodes = packageClassNodes;
     }
+
+    classNodes = classNodes.filter(node => !node.Virtual);
 
     if (classNodes.length === 0) {
         vscode.window.showInformationMessage(`No classes found under package root '${targetRootPackage}'.`);
@@ -333,6 +335,8 @@ function generateMermaidPackageGraph(dsMap, targetNode, deps) {
     if (serializedFileMap && serializedFileMap !== '{}') {
         metadataLines.push(`%%CROSSWAY_FILE_MAP:${serializedFileMap}`);
     }
+
+
 
     if (metadataLines.length > 0) {
         return `${metadataLines.join('\n')}\n${mermaidGraph}`;

@@ -1,5 +1,16 @@
+// Helper to resolve and open the target node from metadataKey
+function handleEdgeTooltipDoubleClick(metadataKey, targetName, signature, targetType) {
+  let targetNodeId = null;
+  if (typeof metadataKey === 'string' && metadataKey.includes('->')) {
+    targetNodeId = metadataKey.split('->')[1];
+  }
+  if (targetNodeId && typeof window.openNodeFile === 'function') {
+    window.openNodeFile(targetNodeId, targetType, targetName, signature);
+  } else {
+    console.log('Could not resolve target nodeId for openNodeFile:', { target: targetName, signature: signature, metadataKey });
+  }
+}
 // Edge tooltip rendering, positioning, and pin-state management.
-// Loaded before nodeTooltip.js and crosswayaiViewer.js.
 
 const tooltipList = document.getElementById('edgeTooltip');
 const edgeTooltipDetail = document.getElementById('edgeTooltipDetail');
@@ -77,6 +88,42 @@ function positionEdgeTooltip(clientX, clientY) {
   tooltipList.style.top = `${top}px`;
 }
 
+function getEdgeTooltipSection(itemText) {
+  const text = String(itemText || '').trim();
+  const lower = text.toLowerCase();
+
+  if (/\(invoke\)\s*$/i.test(text) || lower === 'invoke' || lower.startsWith('invoke:')) {
+    return 'invoke';
+  }
+
+  if (/\(run\)\s*$/i.test(text) || lower === 'run' || lower.startsWith('run:')) {
+    return 'run';
+  }
+
+  if (
+    /\((property|public-property|inherited-property)\)\s*$/i.test(text)
+    || lower === 'property'
+    || lower === 'public-property'
+    || lower === 'inherited-property'
+    || lower.startsWith('property:')
+    || lower.startsWith('public-property:')
+    || lower.startsWith('inherited-property:')
+  ) {
+    return 'property';
+  }
+
+  return 'other';
+}
+
+function getEdgeTooltipDisplayText(itemText) {
+  const text = String(itemText || '').trim();
+  return text
+    .replace(/\s*\(invoke\)\s*$/i, '')
+    .replace(/\s*\(run\)\s*$/i, '')
+    .replace(/\s*\((property|public-property|inherited-property)\)\s*$/i, '')
+    .trim();
+}
+
 function showEdgeTooltip(items, event, metadataKey = null) {
   if (!items || items.length === 0) {
     hideEdgeTooltip();
@@ -118,23 +165,66 @@ function showEdgeTooltip(items, event, metadataKey = null) {
     .filter(Boolean)
     .map((item) => {
       const isParams = /^params\s*:/i.test(item);
-      const methodKey = item.replace(/\s*\((invoke|run)\)\s*/i, '').trim();
+      const methodKey = item
+        .replace(/\s*\((invoke|run)\)\s*$/i, '')
+        .replace(/\s*\((property|public-property|inherited-property)\)\s*$/i, '')
+        .trim();
+      const displayItem = isParams ? item : getEdgeTooltipDisplayText(item);
       const signatures = getMethodSignatures(methodKey);
       const isCall = /\((invoke|run)\)\s*$/i.test(item) || signatures.length > 0;
-      const cls = isParams ? ' class="param-line"' : ' class="method-item"';
+      // Only assign method-item class if this is a method (not property or run)
+      let cls = '';
+      if (isParams) {
+        cls = ' class="param-line"';
+      } else if (getEdgeTooltipSection(item) === 'invoke' || getEdgeTooltipSection(item) === 'run' || getEdgeTooltipSection(item) === 'method') {
+        cls = ' class="method-item"';
+      }
       const sigAttr = isParams
         ? ''
         : ` data-signature="${escapeHtml(signatures.join('|||'))}" data-method="${escapeHtml(methodKey)}" data-is-call="${isCall ? 'true' : 'false'}"`;
-      return `<li${cls}${sigAttr}>${escapeHtml(item)}</li>`;
+      // Add data-original attribute for later type detection
+      const section = getEdgeTooltipSection(item);
+      return {
+        section,
+        html: `<li${cls}${sigAttr} data-original="${escapeHtml(item)}" data-section="${section}">${escapeHtml(displayItem)}</li>`
+      };
     })
-    .join('');
+    .filter((entry) => entry && entry.html);
 
-  if (!renderedItems) {
+  if (renderedItems.length === 0) {
     hideEdgeTooltip();
     return;
   }
 
-  tooltipList.innerHTML = `<ul>${renderedItems}</ul>`;
+  const sectionOrder = ['invoke', 'run', 'property'];
+  const sectionTitleByKey = {
+    invoke: 'Invoke',
+    run: 'Run',
+    property: 'Property'
+  };
+
+  const renderedSections = sectionOrder
+    .map((sectionKey) => {
+      const sectionItems = renderedItems
+        .filter((entry) => entry.section === sectionKey)
+        .map((entry) => entry.html)
+        .join('');
+
+      if (!sectionItems) {
+        return '';
+      }
+
+      const title = sectionTitleByKey[sectionKey] || 'Links';
+      return `<div class="edge-tooltip-section edge-tooltip-section-${sectionKey}"><div class="tooltip-section-title">${escapeHtml(title)}</div><ul>${sectionItems}</ul></div>`;
+    })
+    .join('');
+
+  if (!renderedSections) {
+    hideEdgeTooltip();
+    return;
+  }
+
+  tooltipList.innerHTML = renderedSections;
   tooltipList.hidden = false;
   positionEdgeTooltip(event.clientX, event.clientY);
   clearPinnedEdgeDetail();
@@ -144,8 +234,8 @@ function showEdgeTooltip(items, event, metadataKey = null) {
     const tooltipRows = tooltipList.querySelectorAll('li');
     tooltipRows.forEach((li) => {
       const isMethodRow = li.classList.contains('method-item');
-      const renderMethodDetail = () => {
-        const methodName = li.getAttribute('data-method') || '';
+      const renderDetailTooltip = () => {
+        const callItemName = li.getAttribute('data-method') || '';
         const signatureRaw = li.getAttribute('data-signature') || '';
         const signatureList = signatureRaw.split('|||').map(item => item.trim());
         const normalizedSignatures = signatureList.map(signature => signature.trim());
@@ -164,10 +254,10 @@ function showEdgeTooltip(items, event, metadataKey = null) {
             entries.push(`(${signature})`);
           });
         const signatureItems = entries
-          .map(entry => `<li>${escapeHtml(entry)}</li>`)
+          .map(entry => `<li class="signature-item">${escapeHtml(entry)}</li>`)
           .join('');
         const signatureListHtml = signatureItems ? `<ul>${signatureItems}</ul>` : '';
-        edgeTooltipDetail.innerHTML = `<div class="detail-title">${escapeHtml(methodName)}</div>${signatureListHtml}`;
+        edgeTooltipDetail.innerHTML = `<div class="detail-title">${escapeHtml(callItemName)}</div>${signatureListHtml}`;
         edgeTooltipDetail.hidden = false;
         const tooltipRect = tooltipList.getBoundingClientRect();
         const liRect = li.getBoundingClientRect();
@@ -180,6 +270,34 @@ function showEdgeTooltip(items, event, metadataKey = null) {
           left = tooltipRect.left - detailRect.width - 8;
           edgeTooltipDetail.style.left = `${left}px`;
         }
+
+        // Add double-click handler to detail title
+        const detailTitle = edgeTooltipDetail.querySelector('.detail-title');
+        const detailSection = li.getAttribute('data-section') || getEdgeTooltipSection(li.getAttribute('data-original') || callItemName);
+        const detailTargetType = detailSection === 'run' ? 'procedure' : 'method';
+        if (detailTitle) {
+          detailTitle.addEventListener('dblclick', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleEdgeTooltipDoubleClick(metadataKey, callItemName, '', detailTargetType);
+          });
+        }
+
+        // Add double-click handler to detail signature <li> elements
+        const signatureLis = edgeTooltipDetail.querySelectorAll('li.signature-item');
+        signatureLis.forEach((sigLi, idx) => {
+          sigLi.addEventListener('dblclick', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            // Pass the specific signature if available
+            let sig = '';
+            if (entries[idx]) {
+              sig = entries[idx].replace(/^\(|\)$/g, '').trim(); // Remove surrounding parens
+            }
+            const signatureForOpen = detailTargetType === 'procedure' ? '' : sig;
+            handleEdgeTooltipDoubleClick(metadataKey, callItemName, signatureForOpen, detailTargetType);
+          });
+        });
       };
 
       const getDetailKey = () => {
@@ -209,13 +327,11 @@ function showEdgeTooltip(items, event, metadataKey = null) {
           }
           return;
         }
-        const signatureRaw = li.getAttribute('data-signature') || '';
-        const methodName = li.getAttribute('data-method') || '';
-        const detailKey = `${methodName}::${signatureRaw}`;
+        const detailKey = getDetailKey();
         if (window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY !== detailKey) {
           return;
         }
-        renderMethodDetail();
+        renderDetailTooltip();
       });
       li.addEventListener('click', (event) => {
         if (!isMethodRow) {
@@ -227,9 +343,7 @@ function showEdgeTooltip(items, event, metadataKey = null) {
         }
         event.preventDefault();
         event.stopPropagation();
-        const signatureRaw = li.getAttribute('data-signature') || '';
-        const methodName = li.getAttribute('data-method') || '';
-        const detailKey = `${methodName}::${signatureRaw}`;
+        const detailKey = getDetailKey();
         const isAlreadyPinned = window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED && window.CROSSWAY_EDGE_DETAIL_PINNED_KEY === detailKey;
         if (isAlreadyPinned) {
           clearPinnedEdgeDetail();
@@ -242,7 +356,7 @@ function showEdgeTooltip(items, event, metadataKey = null) {
         });
         li.classList.add('active-method');
         pinEdgeDetail(detailKey);
-        renderMethodDetail();
+        renderDetailTooltip();
       });
       li.addEventListener('mouseleave', (event) => {
         if (isMethodRow && (window.CROSSWAY_EDGE_DETAIL_TOOLTIP_PINNED || isPinnedDetailRow())) {
@@ -257,6 +371,28 @@ function showEdgeTooltip(items, event, metadataKey = null) {
           return;
         }
         hideEdgeTooltipDetail();
+      });
+
+      // Double-click event to resolve the target node of the edge
+      li.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        let targetName = li.getAttribute('data-method') || '';
+        const signatureRaw = li.getAttribute('data-signature') || '';
+        const originalText = li.getAttribute('data-original') || li.textContent || targetName;
+        const section = li.getAttribute('data-section') || getEdgeTooltipSection(originalText);
+        let targetType;
+        if (section === 'invoke') {
+          targetType = 'method';
+        } else if (section === 'run') {
+          targetType = 'procedure';
+        } else if (section === 'property') {
+          targetType = 'property';
+          targetName = getEdgeTooltipDisplayText(originalText);
+        } else {
+          targetType = section;
+        }
+        handleEdgeTooltipDoubleClick(metadataKey, targetName, '', targetType);
       });
     });
   }

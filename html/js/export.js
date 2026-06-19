@@ -1,5 +1,5 @@
     function buildExportFileName() {
-      const sourcePath = (defaultMarkdownPath || 'diagram').replace(/\\/g, '/');
+      const sourcePath = (mermaidMarkdownFilePath || 'diagram').replace(/\\/g, '/');
       const sourceFileName = sourcePath.split('/').pop() || 'diagram';
       const withoutExt = sourceFileName.replace(/\.md$/i, '') || 'diagram';
       const safeBase = withoutExt.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || 'diagram';

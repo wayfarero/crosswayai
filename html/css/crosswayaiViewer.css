@@ -35,7 +35,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 18px;
+      padding: 48px 96px 48px 48px;
     }
     #diagram svg g.node,
     #diagram svg .node,

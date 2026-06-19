@@ -1,15 +1,14 @@
 CREATE ALIAS DICTDB FOR DATABASE <database_name>.
-DISPLAY LDBNAME("DICTDB").
 
-os-create-dir value("<workspaceRoot>/.crosswayai").
-os-create-dir value("<workspaceRoot>/.crosswayai/dump").
-os-create-dir value("<workspaceRoot>/.crosswayai/dump/<projectName>").
+os-create-dir value("<workspaceRoot><path_separator>.crosswayai").
+os-create-dir value("<workspaceRoot><path_separator>.crosswayai<path_separator>dump").
+os-create-dir value("<workspaceRoot><path_separator>.crosswayai<path_separator>dump<path_separator><projectName>").
 
 RUN prodict/dump_df.p   ("ALL",
-                         "<workspaceRoot>/.crosswayai/dump/<projectName>/<database_name>.df",
+                         "<workspaceRoot><path_separator>.crosswayai<path_separator>dump<path_separator><projectName><path_separator><database_name>.df",
                           "").
 /*
-Input parameters:
+Input parameters for prodict/dump_df.p:
     file-name                : "ALL" or "<file-name> [,<filename>] ..." -> comma-delimited list of table names
     df-file-name             : Name of file to dump to
     code-page                : ?, "", "<code-page>"
@@ -18,3 +17,67 @@ Input parameters:
                "<code-page>" =  convert to <code-page>
 
 */
+
+/* Proparse schema: dump user tables for this database */
+RUN dumpProparseSchema( "<workspaceRoot>/.crosswayai/dump/<projectName>/<database_name>.proparse.schema",
+                        "user" ).
+
+/* Proparse schema: dump dictdb meta-schema (only once per project) */
+FILE-INFO:FILE-NAME = "<workspaceRoot>/.crosswayai/dump/<projectName>/dictdb.proparse.schema".
+IF FILE-INFO:FULL-PATHNAME = ? THEN
+    RUN dumpProparseSchema( "<workspaceRoot>/.crosswayai/dump/<projectName>/dictdb.proparse.schema",
+                            "dictdb" ).
+
+
+/*------------------------------------------------------------------------
+    Purpose     : Dumps database schema in the Proparse-expected text format.
+    Description : Writes table and field metadata for the currently aliased 
+                  DICTDB database. The dumpMode parameter controls whether 
+                  to dump user tables ("user") or system/meta tables ("dictdb").
+    Notes       : Called from the dumpDfFile.template during DB definition dumps.
+                  The database number in the header is always written as "1" for 
+                  user mode. The correct sequential numbering is applied later
+                  by the JavaScript concatenation step.
+  ----------------------------------------------------------------------*/
+PROCEDURE dumpProparseSchema:
+
+    DEFINE INPUT PARAMETER cOutputFile AS CHARACTER NO-UNDO.
+    DEFINE INPUT PARAMETER cDumpMode   AS CHARACTER NO-UNDO.
+
+    DEFINE VARIABLE cDbLabel AS CHARACTER NO-UNDO.
+    DEFINE VARIABLE cDbNum   AS CHARACTER NO-UNDO.
+
+    IF cDumpMode = "user" THEN
+        ASSIGN
+            cDbLabel = LDBNAME("DICTDB")
+            cDbNum   = "1".
+    ELSE
+        ASSIGN
+            cDbLabel = "dictdb"
+            cDbNum   = "0".
+
+    OUTPUT TO VALUE(cOutputFile).
+
+    PUT UNFORMATTED ":: " cDbLabel " " cDbNum SKIP.
+
+    FOR EACH DICTDB._File NO-LOCK
+       WHERE ( cDumpMode =  "user" AND DICTDB._File._Tbl-Type =  "T" )
+          OR ( cDumpMode <> "user" AND DICTDB._File._Tbl-Type <> "T" )
+          BY DICTDB._File._File-Name :
+
+        PUT UNFORMATTED ": " DICTDB._File._File-Name " " RECID(DICTDB._File) SKIP.
+
+        FOR EACH DICTDB._Field OF DICTDB._File NO-LOCK
+              BY DICTDB._Field._Field-Rpos :
+            PUT UNFORMATTED
+                DICTDB._Field._Field-Name " "
+                RECID(DICTDB._Field) " "
+                CAPS(DICTDB._Field._Data-Type) " "
+                DICTDB._Field._Extent
+                SKIP .
+        END.
+    END.
+
+    OUTPUT CLOSE.
+
+END PROCEDURE.

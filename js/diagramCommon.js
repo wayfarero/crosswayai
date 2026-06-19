@@ -1,207 +1,14 @@
-/**
- * Determines the oeversion for a specific project root, considering the active profile if present.
- * @param {string} projectRoot - The root directory of the project
- * @param {object} fs - Node.js fs module
- * @param {object} path - Node.js path module
- * @param {object} CrossWayAILog - Logger
- * @returns {string|null} oeversion for the project, or null if not found
- */
-function getProjectOEVersion(projectRoot) {
-    const CrossWayAILog = getCrossWayAILog();
-    let activeProfile = null;
-    const profilePath = path.join(projectRoot, '.vscode', 'profile.json');
-    if (fs.existsSync(profilePath)) {
-        try {
-            const profileJson = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-            if (profileJson && profileJson.profile) {
-                activeProfile = profileJson.profile;
-            }
-        } catch (e) {}
-    }
-
-    const projectJsonPath = path.join(projectRoot, 'openedge-project.json');
-    if (fs.existsSync(projectJsonPath)) {
-        try {
-            const projectJson = JSON.parse(fs.readFileSync(projectJsonPath, 'utf8'));
-            //try active profile first
-            if (activeProfile && Array.isArray(projectJson.profiles)) {
-                const foundProfile = projectJson.profiles.find(p => p.name === activeProfile);
-                if (foundProfile && foundProfile.value && foundProfile.value.oeversion) {
-                    if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${foundProfile.value.oeversion}' picked up from current profile '${activeProfile}' in ${projectJsonPath}`);
-                    return foundProfile.value.oeversion;
-                }
-            }
-            //then try project level
-            if (projectJson.oeversion) {
-                if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${projectJson.oeversion}' picked up from project configuration in ${projectJsonPath}`);
-                return projectJson.oeversion;
-            }
-        } catch (e) {
-            if (CrossWayAILog) CrossWayAILog.appendLine(`Failed to parse openedge-project.json at ${projectJsonPath}: ` + e.message);
-        }
-    } else {
-        if (CrossWayAILog) CrossWayAILog.appendLine(`>getProjectOEVersion: openedge-project.json not found at ${projectJsonPath}`);
-    }
-
-    //then try workspace default runtime setting
-    if (vscode) {
-        try {
-            const defaultRuntime = vscode.workspace.getConfiguration('abl.configuration').get('defaultRuntime');
-            if (defaultRuntime) {
-                if (CrossWayAILog) CrossWayAILog.appendLine(`>oeversion '${defaultRuntime}' picked up from workspace defaultRuntime`);
-                return defaultRuntime;
-            }
-        } catch (e) {
-            if (CrossWayAILog) CrossWayAILog.appendLine('Failed to read abl.configuration.defaultRuntime: ' + e.message);
-        }
-    }
-
-    throw new Error(`Could not determine oeversion for ${projectRoot}`);
-}
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { buildNodeLabel } = require('./nodeLabel');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
-
 const diagramColors = require('../resources/diagram-colors.json');
+const { getExclusionsSettings, createExclusionMatcher } = require('./crosswayaiSettings');
+const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
+const { getRuntimeDLC, getWorkspaceRoot } = require('./workspaceProjects');
+const { KNOWN_OE_VERSIONS } = require('./extensionConstants');
 
-function normalizeConfigValue(value) {
-    if (value === undefined || value === null) {
-        return null;
-    }
-
-    const text = String(value).trim();
-    return text || null;
-}
-
-/**
- * Resolves the workspace root directory from the available workspace folders.
- * If there is only one folder, uses its path directly.
- * If the first folder is a parent of other folders, uses path.dirname of a subfolder.
- * Otherwise, uses path.dirname of the first folder.
- */
-function resolveWorkspaceRoot(workspaceFolders) {
-    const CrossWayAILog = getCrossWayAILog();
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No workspace folders found.');
-        return '';
-    }
-
-    // Look for .code-workspace file recursively upward from each workspace folder
-    if (fs) {
-        for (const folder of workspaceFolders) {
-            let dir = folder.uri.fsPath;
-            let prevDir = null;
-            while (dir && dir !== prevDir) {
-                let files = [];
-                try {
-                    files = fs.readdirSync(dir);
-                } catch (e) {
-                    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Permission error reading dir ${dir}`);
-                }
-                const wsFile = files.find(f => f.endsWith('.code-workspace'));
-                if (wsFile) {
-                    if (CrossWayAILog) CrossWayAILog.appendLine(`>resolveWorkspaceRoot: Found .code-workspace in ${dir}`);
-                    return dir;
-                }
-                prevDir = dir;
-                dir = path.dirname(dir);
-            }
-        }
-        if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No .code-workspace found recursively upward from workspace folders.');
-    }
-
-    // Fallback to previous logic
-    const firstFolderPath = workspaceFolders[0].uri.fsPath;
-
-    if (workspaceFolders.length === 1) {
-        if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Only one workspace folder, using: ${firstFolderPath}`);
-        return firstFolderPath;
-    }
-
-    const otherFolders = workspaceFolders.slice(1);
-    const isFirstFolderParent = otherFolders.some(folder => {
-        const relative = path.relative(firstFolderPath, folder.uri.fsPath);
-        return relative && !relative.startsWith('..');
-    });
-
-    if (isFirstFolderParent) {
-        if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: First folder is parent, using: ${path.dirname(otherFolders[0].uri.fsPath)}`);
-        return path.dirname(otherFolders[0].uri.fsPath);
-    }
-
-    if (CrossWayAILog) CrossWayAILog.appendLine(`resolveWorkspaceRoot: Using fallback: ${path.dirname(firstFolderPath)}`);
-    return path.dirname(firstFolderPath);
-}
-
-function getWorkspaceRoot() {
-    const CrossWayAILog = getCrossWayAILog();
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
-        return null;
-    }
-
-    const workspaceRoot = resolveWorkspaceRoot(workspaceFolders, CrossWayAILog);
-    if (!workspaceRoot) {
-        vscode.window.showErrorMessage('CrossWayAI: Could not resolve workspace root for XREF lookup.');
-        return null;
-    }
-
-    return workspaceRoot;
-}
-
-function resolveProjectRootFromName(workspace, projectName, workspaceRoot) {
-    const trimmedProjectName = String(projectName || '').trim();
-    if (!trimmedProjectName) {
-        return workspaceRoot || null;
-    }
-
-    const folders = (workspace && Array.isArray(workspace.workspaceFolders)) ? workspace.workspaceFolders : [];
-    const matchingFolder = folders.find(folder => {
-        const folderPath = folder && folder.uri ? folder.uri.fsPath : '';
-        if (!folderPath) {
-            return false;
-        }
-
-        const folderName = folder.name || path.basename(folderPath);
-        return folderName === trimmedProjectName || path.basename(folderPath) === trimmedProjectName;
-    });
-
-    if (matchingFolder && matchingFolder.uri && matchingFolder.uri.fsPath) {
-        return matchingFolder.uri.fsPath;
-    }
-
-    return workspaceRoot ? path.join(workspaceRoot, trimmedProjectName) : null;
-}
-
-/**
- * Utility to recursively remove a directory if it exists.
- * @param {string} dirPath - Directory path to remove.
- * @param {object} fs - Node.js fs module (dependency injected).
- * @param {object} [CrossWayAILog] - Optional logger.
- * @returns {Promise<void>}
- */
-// Reads the full workspace-level CrossWay settings file; user settings and env vars are ignored.
-function getCrosswayAISettingsJson(workspaceRoot) {
-    if (!workspaceRoot) {
-        return null;
-    }
-
-    const settingsPath = path.join(workspaceRoot, '.crosswayai', 'crosswayai_settings.json');
-    if (!fs.existsSync(settingsPath)) {
-        return null;
-    }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    } catch (error) {
-        throw new Error(`Invalid workspace config: ${error.message}`);
-    }
-
-    return parsed || null;
-}
 
 async function cleanupDirectory(dirPath) {
     const CrossWayAILog = getCrossWayAILog();
@@ -215,34 +22,18 @@ async function cleanupDirectory(dirPath) {
     }
 }
 
-function getRuntimeDLC(oeversion) {
-    const CrossWayAILog = getCrossWayAILog();
-    try {
-        const runtimes = vscode.workspace.getConfiguration('abl.configuration').get('runtimes') || [];
-        const runtimeEntry = runtimes.find(r => r.name === String(oeversion));
-        const runtimePath = runtimeEntry && runtimeEntry.path;
-        if (runtimePath) {
-            if (CrossWayAILog) CrossWayAILog.appendLine(`>getRuntimeDLC: resolved runtime path '${runtimePath}' for oeversion '${oeversion}'`);
-        }
-        return runtimePath || null;
-    } catch (e) {
-        if (CrossWayAILog) CrossWayAILog.appendLine(`>getRuntimeDLC: failed to read runtimes: ${e.message}`);
-        return null;
-    }
-}
 
 /**
  * Runs an ABL script using the provided parameters.
  * @param {Object} options - Options for running the ABL script.
  * @param {Object} options.context - VS Code extension context.
  * @param {string} options.workspaceRoot - The workspace root directory.
- * @param {Object} options.deps - Dependency injection object (vscode, fs, path, CrossWayAILog).
+ * @param {string} [options.oeversion] - Explicit OpenEdge version override.
  * @param {string} [options.scriptName] - The relative path to the ABL script to run (default: 'core/runAnalysis.p').
- * @param {string} [options.propath] - The PROPATH to use (default: extension's crosswayai.pl).
  * @param {string[]} [options.args] - Additional arguments for the ABL process.
  * @returns {Promise<void>} Resolves when the process finishes successfully, rejects on error.
  */
-async function runABLScript({ context, workspaceRoot, deps, scriptName, args: extraArgs = []}) {
+async function runABLScript({ context, workspaceRoot, oeversion, scriptName, args: extraArgs = []}) {
     const CrossWayAILog = getCrossWayAILog();
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
     const crosswayaiTempDir = path.join(crosswayaiDir, 'temp');
@@ -254,8 +45,7 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
     const logFile = path.join(crosswayaiDir, 'crosswayai.log');
     const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-    // Determine oeversion from deps, otherwise fallback to workspace default runtime.
-    let oeversion = deps.oeversion;
+    // Determine oeversion from the provided option, otherwise fallback to the workspace default runtime.
     if (!oeversion) {
         try {
             const defaultRuntime = vscode.workspace.getConfiguration('abl.configuration').get('defaultRuntime');
@@ -273,12 +63,11 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
         }
     }
     const oeversionSafe = String(oeversion).replace(/\./g, '');
-    const knownOEVersions = Array.isArray(deps.knownOEVersions) ? deps.knownOEVersions : [];
     const plDir = path.join(context.extensionPath, 'resources', 'abl', 'pl');
     let extensionAblPath = path.join(plDir, `crosswayai_oe${oeversionSafe}.pl`);
     if (!fs.existsSync(extensionAblPath)) {
         const majorVersion = String(oeversion).split('.')[0];
-        const fallbackVersion = knownOEVersions.find(version => String(version).split('.')[0] === majorVersion);
+        const fallbackVersion = KNOWN_OE_VERSIONS.find(version => String(version).split('.')[0] === majorVersion);
         if (fallbackVersion) {
             const fallbackVersionSafe = String(fallbackVersion).replace(/\./g, '');
             const fallbackPLName = `crosswayai_oe${fallbackVersionSafe}.pl`;
@@ -289,7 +78,7 @@ async function runABLScript({ context, workspaceRoot, deps, scriptName, args: ex
             return;
         }
     }
-    const runtimeDLC = getRuntimeDLC(oeversion, CrossWayAILog);
+    const runtimeDLC = getRuntimeDLC(oeversion);
     if (!runtimeDLC) {
         vscode.window.showErrorMessage(`CrossWayAI: No runtime path configured for OpenEdge version ${oeversion}. Please configure abl.configuration.runtimes in your settings.`);
         return;
@@ -349,35 +138,6 @@ function getDsMapArray(dsMap, tableName) {
     return (((dsMap || {}).dsMap || {})[tableName]) || [];
 }
 
-function normalizeFsPath(fsPath) {
-    return path.normalize(String(fsPath || '')).toLowerCase();
-}
-
-function getDsMapPath(workspaceRoot) {
-    return path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
-}
-
-function getDsMapJsonObject(suppressMissingFileMessage = false) {
-    const CrossWayAILog = getCrossWayAILog();
-
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-        return null;
-    }
-
-    const dsMapPath = getDsMapPath(workspaceRoot);
-
-    if (!fs.existsSync(dsMapPath)) {
-        if (!suppressMissingFileMessage && vscode && vscode.window && typeof vscode.window.showErrorMessage === 'function') {
-            vscode.window.showErrorMessage('CrossWayAI: dsMap.json not found. Please generate the map first.');
-        }
-        return null;
-    }
-
-    const dsMapContent = fs.readFileSync(dsMapPath, 'utf8');
-    return JSON.parse(dsMapContent);
-}
-
 function findDsMapFileEntry(dsMap, sourceFilePath) {
     const tables = ((dsMap || {}).dsMap || {});
     const files = []
@@ -387,13 +147,13 @@ function findDsMapFileEntry(dsMap, sourceFilePath) {
     return files.find(file => normalizeFsPath(file.filePath || file.FilePath) === normalizedSource) || null;
 }
 
-function resolveXrefFilePath(sourceFilePath, workspaceRoot, deps = {}) {
-    const CrossWayAILog = getCrossWayAILog();
+function resolveSourceFileLookupContext(sourceFilePath, workspaceRoot) {
+
     if (!sourceFilePath || !workspaceRoot) {
         return null;
     }
 
-    const dsMapJson = getDsMapJsonObject();
+    const dsMapJson = getDsMapJsonObject(workspaceRoot);
     const fileEntry = findDsMapFileEntry(dsMapJson, sourceFilePath);
     if (!fileEntry) {
         return null;
@@ -409,6 +169,23 @@ function resolveXrefFilePath(sourceFilePath, workspaceRoot, deps = {}) {
         return null;
     }
 
+    return {
+        projectName,
+        sourceName,
+        projectRoot,
+        sourceRoot,
+        relativeSourcePath
+    };
+}
+
+function resolveXrefFilePath(sourceFilePath, workspaceRoot) {
+    const CrossWayAILog = getCrossWayAILog();
+    const lookupContext = resolveSourceFileLookupContext(sourceFilePath, workspaceRoot);
+    if (!lookupContext) {
+        return null;
+    }
+
+    const { projectRoot, relativeSourcePath } = lookupContext;
     const builderDir = path.join(projectRoot, '.builder');
     if (!fs.existsSync(builderDir)) {
         return null;
@@ -435,6 +212,27 @@ function resolveXrefFilePath(sourceFilePath, workspaceRoot, deps = {}) {
     }
 
     return null;
+}
+
+function resolveProparseFilePath(sourceFilePath, workspaceRoot) {
+    const lookupContext = resolveSourceFileLookupContext(sourceFilePath, workspaceRoot);
+    if (!lookupContext) {
+        return null;
+    }
+
+    const { projectName, sourceName, projectRoot, relativeSourcePath } = lookupContext;
+    const parsed = path.parse(relativeSourcePath);
+    const relativeAstPath = path.join(parsed.dir, `${parsed.name}.ast.json`);
+    const candidate = path.join(
+        workspaceRoot,
+        '.crosswayai',
+        '.proparse',
+        projectName || path.basename(projectRoot),
+        sourceName,
+        relativeAstPath
+    );
+
+    return fs.existsSync(candidate) ? candidate : null;
 }
 
 function buildNodeDatabaseDetails(dsMap) {
@@ -519,7 +317,7 @@ function getFirstLinkTypeEntry(linkType, { toLowerCase = true } = {}) {
     return toLowerCase ? firstEntry.toLowerCase() : firstEntry;
 }
 
-function parseInvokeRunSignature(rawLinkType) {
+function parseCallSignature(rawLinkType) {
     if (typeof rawLinkType !== 'string') {
         return null;
     }
@@ -564,8 +362,8 @@ function parseInvokeRunSignature(rawLinkType) {
     };
 }
 
-function getInvokeRunDisplayLabel(rawLinkType, { includeRelationSuffix = false } = {}) {
-    const signature = parseInvokeRunSignature(rawLinkType);
+function getCallLabel(rawLinkType, { includeRelationSuffix = false } = {}) {
+    const signature = parseCallSignature(rawLinkType);
     if (!signature) {
         return '';
     }
@@ -787,7 +585,7 @@ function buildEdgeMethodSignatures(links, allFileNodes) {
     });
 
     Array.from(links || []).forEach((link) => {
-        const signature = parseInvokeRunSignature(link && link.LinkType);
+        const signature = parseCallSignature(link && link.LinkType);
         if (!signature) {
             return;
         }
@@ -819,7 +617,7 @@ function buildGlobalMethodSignatures(links) {
     const globalMethodSigs = {};
 
     Array.from(links || []).forEach((link) => {
-        const signature = parseInvokeRunSignature(link && link.LinkType);
+        const signature = parseCallSignature(link && link.LinkType);
         if (!signature) {
             return;
         }
@@ -939,8 +737,23 @@ function matchesRelationshipType(link, relationshipTypes) {
     );
 }
 
-function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options = {}) {
-    const { getDsMapArray } = deps;
+function isReferencedNode(node, referencedNode) {
+    if (!node || !referencedNode) {
+        return false;
+    }
+
+    if (node.NodeId && referencedNode.NodeId && node.NodeId === referencedNode.NodeId) {
+        return true;
+    }
+
+    if (node.FilePath && referencedNode.FilePath) {
+        return path.normalize(node.FilePath).toLowerCase() === path.normalize(referencedNode.FilePath).toLowerCase();
+    }
+
+    return false;
+}
+
+function generateMermaidRelationshipChainGraph(dsMap, referencedNode, options = {}) {
     const {
         graphType = 'LR',
         diagramTypeName = '',
@@ -951,7 +764,7 @@ function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options 
 
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
-    const startNodeId = targetNode.NodeId;
+    const startNodeId = referencedNode.NodeId;
 
     if (allFileLinks.length === 0 || allFileNodes.length === 0) {
         vscode.window.showWarningMessage(`CrossWayAI: dsMap.json does not contain ${diagramTypeName} diagram data. Please regenerate the map.`);
@@ -967,11 +780,11 @@ function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options 
     );
 
     if (linksToRender.size === 0) {
-        vscode.window.showInformationMessage(`No ${diagramTypeName} references found for ${targetNode.FileName}.`);
+        vscode.window.showInformationMessage(`No ${diagramTypeName} references found for ${referencedNode.FileName}.`);
         return null;
     }
 
-    const graphWriter = createMermaidGraphWriter(targetNode, graphType);
+    const graphWriter = createMermaidGraphWriter(referencedNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
         includeDetailLabels,
@@ -984,8 +797,8 @@ function generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, options 
     return includeDetailLabels ? prependEdgeDetailsMetadata(graph, edges) : graph;
 }
 
-function prependSourceMetadata(graph, targetNode) {
-    const sourceNodeKey = targetNode && (targetNode.NodeId || targetNode.FilePath || targetNode.FileName);
+function prependSourceMetadata(graph, referencedNode) {
+    const sourceNodeKey = referencedNode && (referencedNode.NodeId || referencedNode.FilePath || referencedNode.FileName);
     const sourceNodeId = toMermaidNodeId(sourceNodeKey || 'unknown');
     const sourceLine = `%%CROSSWAY_SOURCE_NODE:${sourceNodeId}`;
     const graphText = typeof graph === 'string' ? graph : String(graph || '');
@@ -997,8 +810,7 @@ function prependSourceMetadata(graph, targetNode) {
     return `${sourceLine}\n${graphText}`;
 }
 
-function resolveDiagramContext(context, uri, deps) {
-    const { getDsMapArray } = deps;
+function resolveDiagramContext(context, uri) {
     const CrossWayAILog = getCrossWayAILog();
     let filePath = '';
 
@@ -1018,7 +830,7 @@ function resolveDiagramContext(context, uri, deps) {
         return null;
     }
 
-    const dsMapJson = getDsMapJsonObject();
+    const dsMapJson = getDsMapJsonObject(workspaceRoot);
     if (!dsMapJson) {
         return null;
     }
@@ -1032,8 +844,8 @@ function resolveDiagramContext(context, uri, deps) {
     }
 
     const normalizedFilePath = path.normalize(filePath);
-    const targetNode = fileNodes.find(node => node.FilePath && path.normalize(node.FilePath).toLowerCase() === normalizedFilePath.toLowerCase());
-    if (!targetNode) {
+    const referencedNode = fileNodes.find(node => node.FilePath && path.normalize(node.FilePath).toLowerCase() === normalizedFilePath.toLowerCase());
+    if (!referencedNode) {
         vscode.window.showInformationMessage(`File ${path.basename(filePath)} not found in dsMap.json.`);
         return null;
     }
@@ -1041,7 +853,7 @@ function resolveDiagramContext(context, uri, deps) {
     return {
         workspaceRoot,
         dsMap: dsMapJson,
-        targetNode
+        referencedNode
     };
 }
 
@@ -1092,10 +904,14 @@ function getDiagramConfig(diagramType) {
     }
 }
 
-async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
-    const { openCrosswayAIViewer, persistMermaid, getDsMapArray } = deps;
+async function generateDiagram(context, uri, diagramType, graphBuilder) {
+
+    const { createMermaidViewer } = require('./crosswayaiContainer');
+    const { openCrosswayAIViewer, persistMermaid } = createMermaidViewer();
     const CrossWayAILog = getCrossWayAILog();
+    
     let config;
+    
     try {
         config = getDiagramConfig(diagramType);
     } catch (error) {
@@ -1106,13 +922,31 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     }
 
     try {
-        const resolvedContext = resolveDiagramContext(context, uri, deps);
+        const resolvedContext = resolveDiagramContext(context, uri);
         if (!resolvedContext) {
             return;
         }
 
-        const { dsMap, targetNode, workspaceRoot } = resolvedContext;
-        const mermaidGraph = graphBuilder(dsMap, targetNode, { getDsMapArray, workspaceRoot });
+        const { dsMap, referencedNode, workspaceRoot } = resolvedContext;
+
+        const exclusions = getExclusionsSettings(workspaceRoot);
+        const isExcluded = createExclusionMatcher(exclusions, workspaceRoot);
+        const nodes = (dsMap.dsMap || {}).ttFileNode || [];
+        const excludedNodeIds = new Set();
+        for (const node of nodes) {
+            if (node.FilePath && isExcluded(node.FilePath)) {
+                excludedNodeIds.add(node.NodeId);
+            }
+        }
+        if (excludedNodeIds.size > 0) {
+            dsMap.dsMap.ttFileNode = nodes.filter(n => !excludedNodeIds.has(n.NodeId));
+            const links = (dsMap.dsMap || {}).ttFileLink || [];
+            dsMap.dsMap.ttFileLink = links.filter(l => !excludedNodeIds.has(l.NodeId) && !excludedNodeIds.has(l.ParentNodeId));
+        }
+
+        const mermaidGraph = diagramType === 'package'
+            ? graphBuilder(dsMap, referencedNode, workspaceRoot)
+            : graphBuilder(dsMap, referencedNode);
 
         if (!mermaidGraph) {
             return;
@@ -1122,8 +956,8 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
         const graphWithNodeDetails = Object.keys(nodeDetails).length > 0
             ? `%%CROSSWAY_NODE_DETAILS:${JSON.stringify(nodeDetails)}\n${mermaidGraph}`
             : mermaidGraph;
-        const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, targetNode);
-        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, targetNode.FileName, graphWithMetadata);
+        const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, referencedNode);
+        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, referencedNode.FileName, graphWithMetadata);
         if (savedPath) {
             await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
             vscode.window.showInformationMessage(`Mermaid diagram saved: ${savedPath}`);
@@ -1135,18 +969,43 @@ async function generateDiagram(context, uri, deps, diagramType, graphBuilder) {
     }
 }
 
-function createMermaidGraphWriter(targetNode, graphType = 'LR') {
+function getNodePrefix(node) {
+    return node.FileDesc ? node.FileDesc.trim() : '';
+}
+
+function getRelativeFolderPath(relPath, projectName, sourceDir) {
+    if (!relPath) {
+        return '';
+    }
+    let stripped = relPath;
+    if (projectName) {
+        const projectPrefix = projectName + path.sep;
+        if (stripped.toLowerCase().startsWith(projectPrefix.toLowerCase())) {
+            stripped = stripped.slice(projectPrefix.length);
+        }
+    }
+    if (sourceDir) {
+        const sourcePrefix = sourceDir + path.sep;
+        if (stripped.toLowerCase().startsWith(sourcePrefix.toLowerCase())) {
+            stripped = stripped.slice(sourcePrefix.length);
+        }
+    }
+    const lastSep = stripped.lastIndexOf(path.sep);
+    return lastSep !== -1 ? stripped.substring(0, lastSep) : '';
+}
+
+function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
     
     let edgeCounter = 0;
 
     const NODE_BORDER_COLORS = diagramColors.nodeBorderColors;
-
     const LINK_COLORS = diagramColors.linkColors;
 
     let mermaidGraph = `graph ${graphType};\n`;
 
     const declaredNodes = new Set();
     const fileMap = {};
+    const virtualNodes = new Set();
 
     function getMermaidNodeId(node) {
         if (!node) {
@@ -1156,67 +1015,16 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         return toMermaidNodeId(node.NodeId || node.FilePath || node.FileName || 'unknown');
     }
 
-    function getNodePrefix(node) {
-        return node.FileDesc ? node.FileDesc.trim() : '';
-    }
-
-    function buildNodeLabel(node) {
-        const prefix = getNodePrefix(node);
-        const firstLine = prefix ? `${prefix}${node.FileName}` : node.FileName;
-        const relPath = node.FileRelPath || '';
-        const projectName = node.project || node.Project || '';
-        const sourceName = node.source || node.Source || '';
-
-        const isStartNode = Boolean(
-            targetNode &&
-            ((node.NodeId && targetNode.NodeId && node.NodeId === targetNode.NodeId) ||
-                (node.FilePath && targetNode.FilePath &&
-                    path.normalize(node.FilePath).toLowerCase() === path.normalize(targetNode.FilePath).toLowerCase()))
-        );
-
-        // Derive the folder path relative to project\source\ by stripping both prefixes
-        // from FileRelPath, then dropping the trailing filename segment.
-        // Result format: [project subpath]\(source directory)\relative folder path
-        let relFolder = '';
-        if (relPath) {
-            let stripped = relPath;
-            if (projectName) {
-                const projectPrefix = projectName + '\\';
-                if (stripped.toLowerCase().startsWith(projectPrefix.toLowerCase())) {
-                    stripped = stripped.slice(projectPrefix.length);
-                }
-            }
-            if (sourceName) {
-                const sourcePrefix = sourceName + '\\';
-                if (stripped.toLowerCase().startsWith(sourcePrefix.toLowerCase())) {
-                    stripped = stripped.slice(sourcePrefix.length);
-                }
-            }
-            const lastSep = stripped.lastIndexOf('\\');
-            relFolder = lastSep !== -1 ? stripped.substring(0, lastSep) : '';
-        }
-
-        const escapedFirst = firstLine.replace(/"/g, '\\"');
-        const escapedProject = projectName
-            ? `<span style='color:#f59e0b'>[${projectName}]</span>`.replace(/"/g, '\\"')
-            : '';
-        const escapedSource = sourceName
-            ? (`<span style='color:${isStartNode ? '#f9a8d4' : '#ec4899'}'>(${sourceName})</span>`).replace(/"/g, '\\"')
-            : '';
-        const escapedRelFolder = relFolder.replace(/"/g, '\\"');
-
-        const parts = [escapedProject, escapedSource, escapedRelFolder].filter(Boolean);
-        if (parts.length > 0) {
-            return `${escapedFirst}\\n${parts.join('\\')}`;
-        }
-
-        return escapedFirst;
-    }
 
     function resolveNodeType(node) {
 
         if (!node || !node.FileName) {
             return "class";
+        }
+
+        // Check if node is virtual first
+        if (node.Virtual === true) {
+            return "virtual";
         }
 
         const prefix = getNodePrefix(node);
@@ -1264,7 +1072,17 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 
         if (!declaredNodes.has(nodeId)) {
 
-            const label = buildNodeLabel(node);
+            const projectName = node.project || node.Project || '';
+            const sourceDir = node.source || node.Source || '';
+            const augumentedNode = {
+                ...node,
+                isRefNode: isReferencedNode(node, referencedNode),
+                LabelPrefix: getNodePrefix(node),
+                ProjectName: projectName,
+                SourceDirectory: sourceDir,
+                RelativeFolderPath: getRelativeFolderPath(node.FileRelPath || '', projectName, sourceDir)
+            };
+            const label = buildNodeLabel(augumentedNode);
             const nodeType = resolveNodeType(node);
 
             writeNode(nodeId, label, nodeType);
@@ -1273,6 +1091,10 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 
             if (node.FilePath) {
                 fileMap[nodeId] = node.FilePath;
+            }
+
+            if (node.Virtual === true) {
+                virtualNodes.add(nodeId);
             }
         }
 
@@ -1292,7 +1114,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 
     function resolveEdgeColor(linkTypeInput) {
         if (!linkTypeInput) {
-            return "#555";
+            return LINK_COLORS.undefined;
         }
 
         const values = Array.isArray(linkTypeInput)
@@ -1306,7 +1128,7 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         ));
 
         if (normalizedTypes.length === 0) {
-            return "#555";
+            return LINK_COLORS.undefined;
         }
 
         // run and invoke are intentionally rendered with the same color.
@@ -1334,11 +1156,11 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
             if (singleType === "extends") {
                 return LINK_COLORS.inherits;
             }
-            return LINK_COLORS[singleType] || "#555";
+            return LINK_COLORS[singleType] || LINK_COLORS.undefined;
         }
 
         // Mixed relationship types on the same edge -> undefined/multiple color.
-        return "#555";
+        return LINK_COLORS.undefined;
     }
 
     function lightenColor(hex, percent) {
@@ -1356,8 +1178,8 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
         return "#" + (r << 16 | g << 8 | b).toString(16).padStart(6,"0");
     }
 
-    const startNodeName = ensureNodeDeclaration(targetNode);
-    const startNodeType = resolveNodeType(targetNode);
+    const startNodeName = ensureNodeDeclaration(referencedNode);
+    const startNodeType = resolveNodeType(referencedNode);
     const startBorder = NODE_BORDER_COLORS[startNodeType] || "#333";
 
     mermaidGraph +=
@@ -1393,8 +1215,9 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
 
     function getGraph() {
         const serializedFileMap = JSON.stringify(fileMap);
+        const serializedVirtualNodes = JSON.stringify(Array.from(virtualNodes));
         if (serializedFileMap && serializedFileMap !== '{}') {
-            return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n${mermaidGraph}`;
+            return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n%%CROSSWAY_VIRTUAL_NODES:${serializedVirtualNodes}\n${mermaidGraph}`;
         }
         return mermaidGraph;
     }
@@ -1411,26 +1234,23 @@ function createMermaidGraphWriter(targetNode, graphType = 'LR') {
     };
 }
 module.exports = {
-    getProjectOEVersion,
-    getRuntimeDLC,
-    normalizeConfigValue,
-    getWorkspaceRoot,
-    resolveWorkspaceRoot,
-    resolveProjectRootFromName,
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,
     runABLScript,
     toMermaidNodeId,
+    normalizeFsPath,
     getDsMapPath,
     getDsMapJsonObject,
     getDsMapArray,
+    getRelativeFolderPath,
     findDsMapFileEntry,
     resolveXrefFilePath,
+    resolveProparseFilePath,
     buildNodeDatabaseDetails,
     getFirstLinkTypeEntry,
-    parseInvokeRunSignature,
-    getInvokeRunDisplayLabel,
+    parseCallSignature,
+    getCallLabel,
     collectDirectionalLinks,
     collectBidirectionalLinks,
     dedupeLinks,
@@ -1442,5 +1262,5 @@ module.exports = {
     parseNamedRelationLabel,
     generateMermaidRelationshipChainGraph,
     cleanupDirectory,
-    getCrosswayAISettingsJson
+    getNodePrefix
 };

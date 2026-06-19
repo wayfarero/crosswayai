@@ -5,19 +5,21 @@ const {
     buildLinkEdgeMap,
     getCircularEdgeKeys,
     renderSortedEdges,
-    getInvokeRunDisplayLabel,
-    getFirstLinkTypeEntry,
     prependEdgeDetailsMetadata,
-    parseNamedRelationLabel,
-    collectBidirectionalLinks
+    collectBidirectionalLinks,
+    getDsMapArray
 } = require('./diagramCommon');
+const {
+    parseCallRelationLabel,
+    edgeLabelExtractor,
+    edgeDetailLabelExtractor
+} = require('./edgeInfo');
 
-async function generateImpactDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'impact', generateMermaidImpactGraph);
+async function generateImpactDiagram(context, uri) {
+    return generateDiagram(context, uri, 'impact', generateMermaidImpactGraph);
 }
 
-function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
-    const { getDsMapArray } = deps;
+function generateMermaidImpactGraph(dsMap, targetNode, graphType = 'LR') {
     const allFileLinks = getDsMapArray(dsMap, 'ttFileLink');
     const allFileNodes = getDsMapArray(dsMap, 'ttFileNode');
     const startNodeId = targetNode.NodeId;
@@ -64,35 +66,13 @@ function generateMermaidImpactGraph(dsMap, targetNode, deps, graphType = 'LR') {
     const graphWriter = createMermaidGraphWriter(targetNode, graphType);
     const { ensureNodeDeclaration, addEdge, getGraph } = graphWriter;
 
-    function parseCallRelationLabel(rawLinkType) {
-        if (typeof rawLinkType !== 'string') {
-            return '';
-        }
 
-        const normalized = rawLinkType.trim();
-        if (!normalized) {
-            return '';
-        }
-
-        const invokeRunLabel = getInvokeRunDisplayLabel(normalized, { includeRelationSuffix: true });
-        if (invokeRunLabel) {
-            return invokeRunLabel;
-        }
-
-        const lower = normalized.toLowerCase();
-
-        if (lower.startsWith('public-property:') || lower.startsWith('inherited-property:')) {
-            return parseNamedRelationLabel(normalized, ['public-property', 'inherited-property']);
-        }
-
-        return '';
-    }
 
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
         includeLabels: true,
-        labelExtractor: link => getFirstLinkTypeEntry(link.LinkType, { toLowerCase: false }),
+        labelExtractor: edgeLabelExtractor,
         includeDetailLabels: true,
-        detailLabelExtractor: link => parseCallRelationLabel(link.LinkType),
+        detailLabelExtractor: edgeDetailLabelExtractor,
         preserveLinkTypeCase: false
     });
 

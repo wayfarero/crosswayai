@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.0
+  - Improvements: 
+    - **added UNIX support to the extension, all commands should work both under Windows and Unix operating system workspaces**
+    - added support to output the Proparse files of the whole workspace and menu command to view the proparse file content of a certain ABL file
+    - added support to handle .pl class references as well, showing the virtual nodes with a purple colour border
+    - added support for excluding certain files or complete folders from diagram generation. See `Diagram Exclusions` section above
+    - moved the file node search count inside the node search box in the `CrossWayAI Viewer`
+    - refactored link tooltip to show separate sections for Invoke, Run and Property 
+    - added double-click events on link tooltip and signature tooltip for quick navigation to the specific method, property or internal procedure
+    - code refactorings for better maintainability
+  - Bug Fixes:
+    - correction for `Export Image` functionality in `CrossWayAI Viewer`
+    - corrected automatic refresh of the `CrossWayAI Viewer` on every code base change that creates / deletes / updates an .xref file
+    - adjusted padding so that top-right file nodes are fully visible and locked the panel of the `CrossWayAI Viewer` so that opening other file will not hide the viewer.
+    - corrected AI summary tooltip copy button functionality
+
 ## 1.8.3
    - Improvements: 
     - introduced .crosswayai/crosswayai_settings.json default configuration file supporting ai settings; Table Relations diagram is restricted to use AI enabled = true.

@@ -1,25 +1,24 @@
 const {
     generateDiagram,
-    generateMermaidRelationshipChainGraph,
-    parseNamedRelationLabel
+    generateMermaidRelationshipChainGraph
 } = require('./diagramCommon');
+const {
+    edgeDetailLabelExtractor
+} = require('./edgeInfo');
 
 const PROPERTY_RELATIONSHIP_TYPES = ['property', 'public-property', 'inherited-property'];
 
-async function generatePropertyAccessDiagram(context, uri, deps) {
-    return generateDiagram(context, uri, deps, 'property_access', generateMermaidPropertyAccessGraph);
+async function generatePropertyAccessDiagram(context, uri) {
+    return generateDiagram(context, uri, 'property_access', generateMermaidPropertyAccessGraph);
 }
 
-function generateMermaidPropertyAccessGraph(dsMap, targetNode, deps, graphType = 'LR') {
-    return generateMermaidRelationshipChainGraph(dsMap, targetNode, deps, {
+function generateMermaidPropertyAccessGraph(dsMap, targetNode, graphType = 'LR') {
+    return generateMermaidRelationshipChainGraph(dsMap, targetNode, {
         graphType,
         diagramTypeName: 'property access',
         relationshipTypes: PROPERTY_RELATIONSHIP_TYPES,
         includeDetailLabels: true,
-        detailLabelExtractor: link => parseNamedRelationLabel(
-            link && link.LinkType,
-            PROPERTY_RELATIONSHIP_TYPES
-        )
+        detailLabelExtractor: edgeDetailLabelExtractor
     });
 }
 
