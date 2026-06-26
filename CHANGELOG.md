@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.1
+  - Bug Fixes:
+    - corrected the automatic refresh of the `CrossWayAI Viewer` due to previous code refactoring
+    - corrected .pl class nodes not showing the relative path under unix environment
+    - corrected Proparse javac usage under linux
+    
 ## 1.9.0
   - Improvements: 
     - **added UNIX support to the extension, all commands should work both under Windows and Unix operating system workspaces**

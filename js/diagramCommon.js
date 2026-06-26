@@ -977,21 +977,22 @@ function getRelativeFolderPath(relPath, projectName, sourceDir) {
     if (!relPath) {
         return '';
     }
-    let stripped = relPath;
+    const displaySeparator = '\\';
+    let stripped = String(relPath).replace(/[\\/]+/g, '/');
     if (projectName) {
-        const projectPrefix = projectName + path.sep;
+        const projectPrefix = String(projectName).replace(/[\\/]+/g, '/') + '/';
         if (stripped.toLowerCase().startsWith(projectPrefix.toLowerCase())) {
             stripped = stripped.slice(projectPrefix.length);
         }
     }
     if (sourceDir) {
-        const sourcePrefix = sourceDir + path.sep;
+        const sourcePrefix = String(sourceDir).replace(/[\\/]+/g, '/') + '/';
         if (stripped.toLowerCase().startsWith(sourcePrefix.toLowerCase())) {
             stripped = stripped.slice(sourcePrefix.length);
         }
     }
-    const lastSep = stripped.lastIndexOf(path.sep);
-    return lastSep !== -1 ? stripped.substring(0, lastSep) : '';
+    const lastSep = stripped.lastIndexOf('/');
+    return lastSep !== -1 ? stripped.substring(0, lastSep).replace(/\//g, displaySeparator) : '';
 }
 
 function createMermaidGraphWriter(referencedNode, graphType = 'LR') {

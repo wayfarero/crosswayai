@@ -179,16 +179,22 @@ function resolveJavacVersion() {
     });
 }
 
-function runCreateProparserScript(scriptPath) {
+function compileProparser(proparsePath) {
 
     const CrossWayAILog = getCrossWayAILog();
-    const isWindows = process.platform === 'win32';
+    const classpath = [
+        proparsePath,
+        path.join(proparsePath, 'proparse.jar'),
+        path.join(proparsePath, 'lib', '*')
+    ].join(path.delimiter);
+    const sourcePath = path.join(proparsePath, 'Proparser.java');
+    const args = ['-cp', classpath, '-d', proparsePath, sourcePath];
 
     return new Promise((resolve, reject) => {
-        const proc = isWindows
-                     ? spawn('cmd.exe', ['/d', '/s', '/c', `call ${scriptPath}`], { cwd: path.dirname(scriptPath) })
-                     : spawn('sh', [scriptPath], { cwd: path.dirname(scriptPath) });
-
+        const proc = spawn('javac', args, {
+            cwd: proparsePath,
+            windowsHide: true
+        });
 
         let stdout = '';
         let stderr = '';
@@ -197,20 +203,20 @@ function runCreateProparserScript(scriptPath) {
         proc.stderr.on('data', d => { stderr += d.toString(); });
 
         proc.on('error', err => {
-            reject(new Error(`Failed to start ${path.basename(scriptPath)}: ${err.message}`));
+            reject(new Error(`Failed to start javac: ${err.message}`));
         });
 
         proc.on('close', code => {
             if (stdout && CrossWayAILog) {
-                CrossWayAILog.appendLine(`>Proparse: ${path.basename(scriptPath)} stdout:\n${stdout.trim()}`);
+                CrossWayAILog.appendLine(`>Proparse: javac stdout:\n${stdout.trim()}`);
             }
             if (stderr && CrossWayAILog) {
-                CrossWayAILog.appendLine(`>Proparse: ${path.basename(scriptPath)} stderr:\n${stderr.trim()}`);
+                CrossWayAILog.appendLine(`>Proparse: javac stderr:\n${stderr.trim()}`);
             }
 
-            if (code !== 0 || /Build FAILED\./i.test(stdout)) {
-                const details = (stderr || stdout).trim();
-                reject(new Error(`${path.basename(scriptPath)} exited with code ${code}. ${details}`));
+            if (code !== 0) {
+                const details = [stderr, stdout].map(output => output.trim()).filter(Boolean).join('\n');
+                reject(new Error(`javac exited with code ${code}.${details ? ` ${details}` : ''}`));
                 return;
             }
 
@@ -231,7 +237,6 @@ async function ensureProparserCompiled(context) {
     const proparsePath = path.join(context.extensionPath, 'resources', 'proparse');
     const classPath = path.join(proparsePath, 'Proparser.class');
     const versionPath = path.join(proparsePath, 'Proparser.javac-version');
-    const scriptPath = path.join(proparsePath, process.platform === 'win32' ? 'create_proparser.bat' : 'create_proparser.sh');
 
     const javacVersion = await resolveJavacVersion();
     if (!javacVersion) {
@@ -254,18 +259,13 @@ async function ensureProparserCompiled(context) {
         return true;
     }
 
-    if (!fs.existsSync(scriptPath)) {
-        vscode.window.showWarningMessage(`CrossWayAI: resources/proparse/${path.basename(scriptPath)} not found. Proparser.java could not be compiled.`);
-        return false;
-    }
-
     const reason = !hasClassFile
         ? 'Proparser.class is missing'
         : 'javac version changed or version metadata is missing';
     CrossWayAILog.appendLine(`>Proparse: ${reason}. Compiling with ${javacVersion}...`);
 
     try {
-        await runCreateProparserScript(scriptPath);
+        await compileProparser(proparsePath);
         if (!fs.existsSync(classPath)) {
             throw new Error('Proparser.class was not created.');
         }

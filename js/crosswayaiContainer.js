@@ -11,7 +11,13 @@ const { generateNodeSummary } = require('./nodeSummary');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 const { FILE_TYPES } = require('./extensionConstants');
 
+let mermaidViewerInstance = null;
+
 function createMermaidViewer() {
+    if (mermaidViewerInstance) {
+        return mermaidViewerInstance;
+    }
+
     const CrossWayAILog = getCrossWayAILog();
 
     let mermaidServer = null;
@@ -745,6 +751,8 @@ function createMermaidViewer() {
             mermaidServerRoot = null;
             mermaidServerPort = null;
         }
+
+        mermaidViewerInstance = null;
     }
 
     function isMermaidViewerOpen() {
@@ -755,13 +763,15 @@ function createMermaidViewer() {
         return Boolean(mermaidViewerPanel);
     }
 
-    return {
+    mermaidViewerInstance = {
         openCrosswayAIViewer,
         deactivateMermaidViewer,
         persistMermaid,
         isMermaidViewerOpen,
         isMermaidViewerVisible
     };
+
+    return mermaidViewerInstance;
 }
 
 module.exports = {
