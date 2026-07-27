@@ -2,10 +2,10 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
-const { resolveWorkspaceRoot, 
-        getOpenEdgeProjectConfig, 
-        resolveProjectSourceDirs, 
-        getProjectOEVersion, 
+const { resolveWorkspaceRoot,
+        getOpenEdgeProjectConfig,
+        resolveProjectSourceDirs,
+        getProjectOEVersion,
         getRuntimeDLC } = require('./workspaceProjects');
 const { buildProparsePropath,
         buildCombinedSchema,
@@ -154,7 +154,7 @@ async function proparseAllProjects(context) {
 
             try {
                 const output = await spawnProparse(javaExe, proparsePath, javaArgs);
-                
+
                 // Write detailed output to the physical crosswayai.log file
                 const logFile = path.join(workspaceRoot, '.crosswayai', 'crosswayai.log');
                 fs.appendFileSync(logFile, `\n--- Proparse Batch: ${srcDir} ---\n${output}\n`);

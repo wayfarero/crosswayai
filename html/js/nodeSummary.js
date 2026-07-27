@@ -25,6 +25,10 @@
         return null;
       }
 
+      if (window.CROSSWAY_VIRTUAL_NODES && window.CROSSWAY_VIRTUAL_NODES.has(nodeId)) {
+        return null;
+      }
+
       const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
       if (!filePath) {
         return null;
@@ -123,16 +127,36 @@
       }, 240);
     }
 
+    function formatNodeSummaryTimestamp(timestamp) {
+      const parsedDate = new Date(String(timestamp || '').trim());
+      if (Number.isNaN(parsedDate.getTime())) {
+        return '';
+      }
+
+      const pad = (value) => String(value).padStart(2, '0');
+      return `${parsedDate.getFullYear()}-${pad(parsedDate.getMonth() + 1)}-${pad(parsedDate.getDate())} ${pad(parsedDate.getHours())}:${pad(parsedDate.getMinutes())}`;
+    }
+
     function renderNodeSummaryFrame(nodeLabel, bodyHtml, options = {}) {
       if (!nodeSummaryPopover) {
         return;
       }
       const showCopy = options.showCopy === true;
+      const timestampText = formatNodeSummaryTimestamp(options.aiSummaryTimestamp);
+      const timestampClass = options.aiSummaryStale === true
+        ? 'summary-timestamp summary-timestamp-stale'
+        : 'summary-timestamp';
       nodeSummaryPopover.innerHTML = `
         <div class="summary-title">AI Summary: ${nodeLabel}</div>
         ${bodyHtml}
         <div class="summary-footer">
-          ${showCopy ? '<button class="summary-copy" type="button" aria-label="Copy summary" title="Copy summary">⧉</button>' : ''}
+          <div class="summary-footer-left">
+            ${timestampText ? `<span class="${timestampClass}">Last update: ${escapeHtml(timestampText)}</span>` : ''}
+          </div>
+          <div class="summary-footer-actions">
+            ${showCopy ? '<button class="summary-reload" type="button" aria-label="Reload summary" title="Reload summary">↻</button>' : ''}
+            ${showCopy ? '<button class="summary-copy" type="button" aria-label="Copy summary" title="Copy summary">⧉</button>' : ''}
+          </div>
         </div>
       `;
     }
@@ -146,13 +170,21 @@
       );
     }
 
-    function renderNodeSummarySuccess(nodeContext, summaryText) {
+    function renderNodeSummarySuccess(nodeContext, summaryText, options = {}) {
       const nodeLabel = escapeHtml(nodeContext?.displayName || 'Node');
       nodeSummaryPinnedText = String(summaryText || '');
+      const generationErrorReason = String(options.generationErrorReason || '').trim();
+      const warningHtml = generationErrorReason
+        ? `<div class="summary-body summary-error summary-generation-error">${escapeHtml(getNodeSummaryErrorMessage(generationErrorReason))}</div>`
+        : '';
       renderNodeSummaryFrame(
         nodeLabel,
-        `<div class="summary-body">${escapeHtml(summaryText || '')}</div>`,
-        { showCopy: true }
+        `${warningHtml}<div class="summary-body">${escapeHtml(summaryText || '')}</div>`,
+        {
+          showCopy: true,
+          aiSummaryTimestamp: options.aiSummaryTimestamp,
+          aiSummaryStale: options.aiSummaryStale === true
+        }
       );
     }
 
@@ -173,7 +205,7 @@
         case 'OPENAI_QUOTA_EXHAUSTED':
           return 'Your OpenAI API quota is exhausted. Update billing or use a different API key.';
         case 'NO_AI_PROVIDER':
-          return 'AI Summary is disabled or not configured. Enable it in .crosswayai/crosswayai_settings.json.';
+          return 'AI features are disabled or not configured. Enable them in .crosswayai/crosswayai_settings.json.';
         case 'FILE_NODE_ONLY':
           return 'AI summaries are available only for file nodes.';
         case 'FILE_READ_FAILED':
@@ -216,7 +248,7 @@
       }
     }
 
-    function openNodeSummary(nodeContext) {
+    function openNodeSummary(nodeContext, options = {}) {
       if (!nodeContext || !nodeSummaryPopover) {
         return;
       }
@@ -232,7 +264,8 @@
       window.parent.postMessage({
         type: 'generateNodeSummary',
         nodeId: nodeContext.nodeId,
-        filePath: nodeContext.filePath
+        filePath: nodeContext.filePath,
+        forceRefresh: options.forceRefresh === true
       }, '*');
     }
 
@@ -272,10 +305,20 @@
 
     if (nodeSummaryPopover) {
       nodeSummaryPopover.addEventListener('click', async (event) => {
-        
         const clickTarget = event.target instanceof Element
                           ? event.target
                           : event.target && event.target.parentElement;
+
+        const reloadButton = clickTarget?.closest('.summary-reload');
+        if (reloadButton) {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (nodeSummaryPinnedContext) {
+            openNodeSummary(nodeSummaryPinnedContext, { forceRefresh: true });
+          }
+          return;
+        }
 
         const copyButton = clickTarget?.closest('.summary-copy');
         if (!copyButton) {
@@ -306,7 +349,7 @@
           if (result) {
             copySuccess = true;
           } else {
-            logger.logToOutput(`[NodeSummary] : copy action failed`); 
+            logger.logToOutput(`[NodeSummary] : copy action failed`);
           }
         } catch (err) {
             logger.logToOutput(`[NodeSummary] ERROR : copy action failed`);
@@ -363,7 +406,11 @@
         }
 
         if (message.ok) {
-          renderNodeSummarySuccess(nodeSummaryPinnedContext, message.summary || '');
+          renderNodeSummarySuccess(nodeSummaryPinnedContext, message.summary || '', {
+            aiSummaryTimestamp: message.aiSummaryTimestamp || '',
+            aiSummaryStale: message.aiSummaryStale === true,
+            generationErrorReason: message.generationErrorReason || ''
+          });
         } else {
           renderNodeSummaryError(nodeSummaryPinnedContext, getNodeSummaryErrorMessage(message.reason));
         }

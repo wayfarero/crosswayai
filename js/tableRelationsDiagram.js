@@ -25,7 +25,7 @@ function generateTableRelationsDiagram(ctx, uri) {
 
         const aiConfig = getAIConfig();
         if (aiConfig.enabled !== true) {
-            vscode.window.showErrorMessage('AI Summary is disabled or not configured. Enable it in .crosswayai/crosswayai_settings.json.');
+            vscode.window.showErrorMessage('AI features are disabled or not configured. Enable them in .crosswayai/crosswayai_settings.json.');
             return;
         }
 

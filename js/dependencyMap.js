@@ -7,6 +7,28 @@ const { getWorkspaceRoot, getProjectNameForFolder, loadOpenEdgeProjectConfig, fi
 const { setAnalysisRunning } = require('./analysisState');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 
+const MISSING_XREF_WARNING_MESSAGE = 'CrossWayAI: Dependency map generation completed with missing XREF files. Some relationships may be incomplete. See CrossWayAILog and .crosswayai/crosswayai.log for details.';
+const MISSING_XREF_LOG_PATTERNS = [
+    '.xref file not found for',
+    'no .xref file found for'
+];
+
+
+function appendLogLineSafely(CrossWayAILog, message, { show = false } = {}) {
+    if (!CrossWayAILog) {
+        return false;
+    }
+
+    try {
+        CrossWayAILog.appendLine(message);
+        if (show) {
+            CrossWayAILog.show(true);
+        }
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
 
 function getDsMapFileCount(workspaceRoot) {
     try {
@@ -15,7 +37,7 @@ function getDsMapFileCount(workspaceRoot) {
             return 0;
         }
         return (dsMapJson.dsMap && dsMapJson.dsMap.ttFile) ? dsMapJson.dsMap.ttFile.length : 0;
-    } catch (e) {
+    } catch (error) {
         return 0;
     }
 }
@@ -41,6 +63,44 @@ function getWorkspaceProjectsSourceDirMap(workspaceFolders, workspaceRoot) {
     }
 
     return workspaceSourceDirMap;
+}
+
+function getMissingXrefLogStatus(workspaceRoot) {
+    const logPath = path.join(workspaceRoot, '.crosswayai', 'crosswayai.log');
+    if (!fs.existsSync(logPath)) {
+        return { hasEntries: false, error: null };
+    }
+
+    try {
+        const logContent = fs.readFileSync(logPath, 'utf8').toLowerCase();
+        return {
+            hasEntries: MISSING_XREF_LOG_PATTERNS.some(pattern => logContent.includes(pattern)),
+            error: null
+        };
+    } catch (error) {
+        return { hasEntries: false, error };
+    }
+}
+
+function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
+    const missingXrefLogStatus = getMissingXrefLogStatus(workspaceRoot);
+    if (missingXrefLogStatus.error) {
+        appendLogLineSafely(
+            CrossWayAILog,
+            `>Warning: Failed to inspect crosswayai.log for missing XREF entries: ${missingXrefLogStatus.error.message}`,
+            { show: true }
+        );
+        return false;
+    }
+
+    if (!missingXrefLogStatus.hasEntries) {
+        return false;
+    }
+
+    appendLogLineSafely(CrossWayAILog, MISSING_XREF_WARNING_MESSAGE, { show: true });
+
+    vscode.window.showWarningMessage(MISSING_XREF_WARNING_MESSAGE);
+    return true;
 }
 
 
@@ -104,7 +164,9 @@ async function generateDependencyMap(context) {
                     if (dsMapJson.dsMap && dsMapJson.dsMap.ttFile) {
                         dsMap.dsMap.ttFile = dsMapJson.dsMap.ttFile.concat(dsMap.dsMap.ttFile);
                     }
-                } catch (e) { /* ignore parse errors, start fresh */ }
+                } catch (error) {
+                    appendLogLineSafely(CrossWayAILog, `>Warning: Failed to read existing dsMap.json, starting fresh: ${error.message}`);
+                }
             }
             fs.writeFileSync(dsMapPath, JSON.stringify(dsMap, null, 2));
 
@@ -134,14 +196,20 @@ async function generateDependencyMap(context) {
 
     CrossWayAILog.appendLine(`>Running ABL analysis...`);
     CrossWayAILog.show(true);
+    let ablAnalysisCompleted = false;
     try {
         setAnalysisRunning(true);
         await runABLAnalysis(context, workspaceRoot);
+        ablAnalysisCompleted = true;
     } catch (error) {
         CrossWayAILog.appendLine(`**Error during ABL analysis: ${error.message}`);
         CrossWayAILog.show(true);
     } finally {
         setAnalysisRunning(false);
+    }
+
+    if (ablAnalysisCompleted) {
+        showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog);
     }
 
     CrossWayAILog.appendLine("Done generating dependency map.\n");

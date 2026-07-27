@@ -49,7 +49,13 @@ function getAIConfig() {
         provider: normalizeConfigValue(workspaceAISettings?.provider),
         baseUrl: normalizeBaseUrl(httpConfig.baseUrl),
         apiKey: normalizeConfigValue(httpConfig.apiKey),
-        model: normalizeConfigValue(httpConfig.model)
+        model: normalizeConfigValue(httpConfig.model),
+        vscode: {
+            vendor: normalizeConfigValue(workspaceAISettings?.vscode?.vendor || workspaceAISettings?.vendor),
+            model: normalizeConfigValue(workspaceAISettings?.vscode?.model || workspaceAISettings?.vscode?.family || workspaceAISettings?.model || workspaceAISettings?.family),
+            id: normalizeConfigValue(workspaceAISettings?.vscode?.id || workspaceAISettings?.id),
+            version: normalizeConfigValue(workspaceAISettings?.vscode?.version || workspaceAISettings?.version)
+        }
     };
 }
 
@@ -197,8 +203,177 @@ function buildVSCodePrompt(request) {
         .join('\n\n');
 }
 
-// Builds a VS Code Language Model client using only the first available model.
-async function createVSCodeAIClient() {
+function collectVSCodeChunkText(chunk) {
+    if (chunk == null) {
+        return '';
+    }
+
+    if (typeof chunk === 'string') {
+        return chunk;
+    }
+
+    if (Array.isArray(chunk)) {
+        return chunk.map(collectVSCodeChunkText).join('');
+    }
+
+    if (typeof chunk === 'object') {
+        for (const key of ['value', 'text', 'content', 'delta']) {
+            if (typeof chunk[key] === 'string') {
+                return chunk[key];
+            }
+        }
+    }
+
+    return '';
+}
+
+async function extractVSCodeAIText(response) {
+    if (typeof response === 'string') {
+        return response.trim();
+    }
+
+    const sources = [
+        response?.stream,
+        response?.text
+    ];
+    const seen = new Set();
+
+    for (const source of sources) {
+        if (source == null || seen.has(source)) {
+            continue;
+        }
+        seen.add(source);
+
+        if (typeof source === 'string') {
+            return source.trim();
+        }
+
+        if (source && typeof source[Symbol.asyncIterator] === 'function') {
+            let text = '';
+            for await (const chunk of source) {
+                text += collectVSCodeChunkText(chunk);
+            }
+            if (text.trim()) {
+                return text.trim();
+            }
+        }
+    }
+
+    return '';
+}
+
+function getVSCodeModelId(model) {
+    return String(model?.id || model?.name || 'unknown');
+}
+
+function isAutoVSCodeModel(model) {
+    return getVSCodeModelId(model).toLowerCase() === 'auto';
+}
+
+function getConfiguredVSCodeSelector(config) {
+    const vscodeConfig = config?.vscode || {};
+    return {
+        ...(vscodeConfig.vendor ? { vendor: vscodeConfig.vendor } : {}),
+        ...(vscodeConfig.model ? { family: vscodeConfig.model } : {}),
+        ...(vscodeConfig.id ? { id: vscodeConfig.id } : {}),
+        ...(vscodeConfig.version ? { version: vscodeConfig.version } : {})
+    };
+}
+
+function hasConfiguredVSCodeSelector(config) {
+    return Object.keys(getConfiguredVSCodeSelector(config)).length > 0;
+}
+
+function formatVSCodeSelector(selector) {
+    const parts = Object.entries(selector || {})
+        .map(([key, value]) => key + '=' + value);
+    return parts.length > 0 ? parts.join(', ') : '(none)';
+}
+
+function notifyInvalidConfig(message) {
+    logAI('[AI] invalid config: ' + message);
+    if (vscode?.window && typeof vscode.window.showErrorMessage === 'function') {
+        vscode.window.showErrorMessage('CrossWayAI: ' + message);
+    }
+}
+
+function getVSCodeModelSelectors(config) {
+    const configuredSelector = getConfiguredVSCodeSelector(config);
+
+    if (Object.keys(configuredSelector).length > 0) {
+        return [configuredSelector];
+    }
+
+    return [
+        { vendor: 'copilot', family: 'gpt-4o' },
+        { vendor: 'copilot' },
+        {}
+    ].filter((selector, index, selectors) => {
+        const text = JSON.stringify(selector);
+        return index === selectors.findIndex((candidate) => JSON.stringify(candidate) === text);
+    });
+}
+
+async function selectVSCodeChatModels(config) {
+    const modelsById = new Map();
+
+    for (const selector of getVSCodeModelSelectors(config)) {
+        let selectedModels;
+        try {
+            selectedModels = await vscode.lm.selectChatModels(selector);
+        } catch (error) {
+            continue;
+        }
+
+        const usableModels = Array.isArray(selectedModels)
+            ? selectedModels.filter((model) => model && typeof model.sendRequest === 'function')
+            : [];
+
+        for (const model of usableModels) {
+            const id = getVSCodeModelId(model);
+            if (!modelsById.has(id)) {
+                modelsById.set(id, model);
+            }
+        }
+    }
+
+    return Array.from(modelsById.values()).sort((left, right) => {
+        if (isAutoVSCodeModel(left) === isAutoVSCodeModel(right)) {
+            return 0;
+        }
+        return isAutoVSCodeModel(left) ? 1 : -1;
+    });
+}
+
+async function requestVSCodeModelText(model, promptText, userMessageFactory) {
+    logAI(`[AI] using provider=vscode model=${getVSCodeModelId(model)}`);
+
+    const tokenSource = typeof vscode.CancellationTokenSource === 'function'
+        ? new vscode.CancellationTokenSource()
+        : null;
+    let response;
+    try {
+        response = await model.sendRequest(
+            [userMessageFactory(promptText)],
+            {},
+            tokenSource?.token
+        );
+    } catch (error) {
+        logAI(`[AI] sendRequest failed for model=${getVSCodeModelId(model)}: ${error.message}`);
+        throw error;
+    }
+
+    try {
+        return await extractVSCodeAIText(response);
+    } finally {
+        if (tokenSource && typeof tokenSource.dispose === 'function') {
+            tokenSource.dispose();
+        }
+    }
+}
+
+// Builds a VS Code Language Model client using available model candidates.
+async function createVSCodeAIClient(config) {
     if (!vscode?.lm || typeof vscode.lm.selectChatModels !== 'function') {
         invalidConfig('VS Code AI provider requires vscode.lm.selectChatModels.');
     }
@@ -208,55 +383,44 @@ async function createVSCodeAIClient() {
         invalidConfig('VS Code AI provider requires LanguageModelChatMessage.User.');
     }
 
-    let models;
-    try {
-        models = await vscode.lm.selectChatModels();
-    } catch (error) {
-        invalidConfig(`VS Code AI provider failed to select models: ${error.message}`);
-    }
-
-    if (!Array.isArray(models) || models.length === 0) {
+    const models = await selectVSCodeChatModels(config);
+    if (models.length === 0) {
+        if (hasConfiguredVSCodeSelector(config)) {
+            const selectorText = formatVSCodeSelector(getConfiguredVSCodeSelector(config));
+            const message = 'VS Code AI provider found no available model for configured selector: ' + selectorText + '.';
+            notifyInvalidConfig(message);
+            throw new Error(message);
+        }
         invalidConfig('VS Code AI provider has no available models.');
-    }
-
-    const model = models[0];
-    if (!model || typeof model.sendRequest !== 'function') {
-        invalidConfig('VS Code AI provider first model is not usable.');
     }
 
     return {
         provider: 'vscode',
-        model: model.id || null,
+        model: getVSCodeModelId(models[0]),
         async execute(request) {
             const promptText = buildVSCodePrompt(request);
             if (!promptText) {
                 return '';
             }
 
-            logAI(`[AI] using provider=vscode model=${model.id || 'unknown'}`);
-
-            const response = await model.sendRequest(
-                [userMessageFactory(promptText)],
-                {},
-                undefined
-            );
-
-            let text = '';
-            const stream = response?.text;
-            if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
-                for await (const chunk of stream) {
-                    if (typeof chunk === 'string') {
-                        text += chunk;
-                    } else if (chunk && typeof chunk.value === 'string') {
-                        text += chunk.value;
-                    } else if (chunk && typeof chunk.text === 'string') {
-                        text += chunk.text;
+            let lastError = null;
+            for (const model of models) {
+                try {
+                    const text = await requestVSCodeModelText(model, promptText, userMessageFactory);
+                    if (text) {
+                        logAI(`[AI] response(vscode): ${summarizeForLog(text)}`);
+                        return text;
                     }
+                } catch (error) {
+                    lastError = error;
                 }
             }
 
-            logAI(`[AI] response(vscode): ${summarizeForLog(text)}`);
-            return text;
+            if (lastError) {
+                throw lastError;
+            }
+            logAI('[AI] response(vscode): (empty)');
+            return '';
         }
     };
 }
@@ -305,7 +469,7 @@ async function createAIClient() {
 
     if (config.provider === 'vscode') {
         logAI('[AI] provider=vscode');
-        const client = await createVSCodeAIClient();
+        const client = await createVSCodeAIClient(config);
         return withLegacyComplete(client);
     }
 

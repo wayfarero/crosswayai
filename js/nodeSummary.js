@@ -3,10 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { createBestAvailableAIClient } = require('./aiClient');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
+const { getWorkspaceRoot } = require('./workspaceProjects');
 
 const NODE_SUMMARY_PROMPT_PATH = ['resources', 'ai_prompts', '@node_summary'];
 const SUMMARY_MAX_LENGTH = 420;
 const SUMMARY_CACHE_MAX = 500;
+const STALE_SUMMARY_MS = 7 * 24 * 60 * 60 * 1000;
 const summaryCache = new Map();
 
 function normalizeWhitespace(text) {
@@ -72,11 +75,122 @@ function getFileStats(filePath) {
     return fs.statSync(filePath);
 }
 
+function padDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function formatSummaryTimestamp(date = new Date()) {
+    return [
+        date.getFullYear(),
+        '-',
+        padDatePart(date.getMonth() + 1),
+        '-',
+        padDatePart(date.getDate()),
+        'T',
+        padDatePart(date.getHours()),
+        ':',
+        padDatePart(date.getMinutes()),
+        ':',
+        padDatePart(date.getSeconds())
+    ].join('');
+}
+
+function parseSummaryTimestamp(timestamp) {
+    const text = String(timestamp || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    const parsedDate = new Date(text);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function isSummaryStale(timestamp, stats) {
+    const parsedTimestamp = parseSummaryTimestamp(timestamp);
+    if (!parsedTimestamp) {
+        return false;
+    }
+
+    const fileModifiedMs = Number(stats && stats.mtimeMs ? stats.mtimeMs : 0);
+    const ageMs = Date.now() - parsedTimestamp.getTime();
+    return fileModifiedMs > parsedTimestamp.getTime() || ageMs > STALE_SUMMARY_MS;
+}
+
+function buildSummaryResult(summary, timestamp, stats, extra = {}) {
+    return {
+        ok: true,
+        summary,
+        aiSummaryTimestamp: timestamp || '',
+        aiSummaryStale: isSummaryStale(timestamp, stats),
+        ...extra
+    };
+}
+
+function findDsMapFileRow(dsMapJson, filePath) {
+    const rows = dsMapJson && dsMapJson.dsMap && Array.isArray(dsMapJson.dsMap.ttFile)
+        ? dsMapJson.dsMap.ttFile
+        : [];
+    const normalizedFilePath = normalizeFsPath(path.resolve(String(filePath || '')));
+
+    return rows.find(row => normalizeFsPath(path.resolve(String(row.filePath || ''))) === normalizedFilePath) || null;
+}
+
+function getSavedNodeSummary(filePath, stats, CrossWayAILog) {
+    try {
+        const workspaceRoot = getWorkspaceRoot();
+        const dsMapJson = getDsMapJsonObject(workspaceRoot, true);
+        const fileRow = findDsMapFileRow(dsMapJson, filePath);
+        const savedSummary = fileRow ? String(fileRow.aiSummary || '').trim() : '';
+        const savedTimestamp = fileRow ? String(fileRow.aiSummaryTimestamp || '').trim() : '';
+
+        if (savedSummary) {
+            CrossWayAILog.appendLine(`[NodeSummary] dsMap hit for ${path.basename(filePath)}`);
+            return buildSummaryResult(savedSummary, savedTimestamp, stats);
+        }
+    } catch (error) {
+        CrossWayAILog.appendLine(`[NodeSummary] dsMap summary read skipped: ${error.message}`);
+    }
+
+    return null;
+}
+
+function saveNodeSummary(filePath, summary, timestamp, CrossWayAILog) {
+    try {
+        const workspaceRoot = getWorkspaceRoot();
+        const dsMapJson = getDsMapJsonObject(workspaceRoot, true);
+        const fileRow = findDsMapFileRow(dsMapJson, filePath);
+
+        if (!fileRow) {
+            CrossWayAILog.appendLine(`[NodeSummary] dsMap summary write skipped: no dsMap row found for ${path.basename(filePath)}`);
+            return;
+        }
+
+        // Keep the summary with the ttFile row so it survives viewer restarts.
+        fileRow.aiSummary = summary;
+        fileRow.aiSummaryTimestamp = timestamp || null;
+        fs.writeFileSync(getDsMapPath(workspaceRoot), JSON.stringify(dsMapJson, null, 2), 'utf8');
+    } catch (error) {
+        CrossWayAILog.appendLine(`[NodeSummary] dsMap summary write skipped: ${error.message}`);
+    }
+}
+
+function buildFailureWithSavedSummary(savedSummaryResult, reason) {
+    if (!savedSummaryResult || !savedSummaryResult.summary) {
+        return null;
+    }
+
+    return {
+        ...savedSummaryResult,
+        generationErrorReason: reason
+    };
+}
+
 async function generateNodeSummary(args) {
     const {
         filePath,
         nodeId,
-        aiClient
+        aiClient,
+        forceRefresh
     } = args || {};
     const CrossWayAILog = getCrossWayAILog();
 
@@ -107,23 +221,28 @@ async function generateNodeSummary(args) {
         };
     }
 
+    const savedSummaryResult = getSavedNodeSummary(normalizedFilePath, stats, CrossWayAILog);
+    if (forceRefresh !== true && savedSummaryResult) {
+        return savedSummaryResult;
+    }
+
     const mtimeMs = Number(stats.mtimeMs || 0);
     const cacheKey = `${normalizedFilePath}::${mtimeMs}`;
-    const cachedSummary = summaryCache.get(cacheKey);
-    if (cachedSummary) {
-        // refresh LRU position
-        summaryCache.delete(cacheKey);
-        summaryCache.set(cacheKey, cachedSummary);
-        CrossWayAILog.appendLine(`[NodeSummary] cache hit for ${path.basename(normalizedFilePath)}`);
-        return {
-            ok: true,
-            summary: cachedSummary
-        };
+    if (forceRefresh !== true) {
+        const cachedSummaryResult = summaryCache.get(cacheKey);
+        if (cachedSummaryResult) {
+            // refresh LRU position
+            summaryCache.delete(cacheKey);
+            summaryCache.set(cacheKey, cachedSummaryResult);
+            CrossWayAILog.appendLine(`[NodeSummary] cache hit for ${path.basename(normalizedFilePath)}`);
+            return cachedSummaryResult;
+        }
     }
 
     const resolvedAIClient = aiClient || await createBestAvailableAIClient();
     if (!resolvedAIClient) {
-        return {
+        const savedFailureResult = buildFailureWithSavedSummary(savedSummaryResult, 'NO_AI_PROVIDER');
+        return savedFailureResult || {
             ok: false,
             reason: 'NO_AI_PROVIDER'
         };
@@ -134,7 +253,8 @@ async function generateNodeSummary(args) {
         fileContents = fs.readFileSync(normalizedFilePath, 'utf8');
     } catch (error) {
         CrossWayAILog.appendLine(`[NodeSummary] file read failed: ${normalizedFilePath} (${error.message})`);
-        return {
+        const savedFailureResult = buildFailureWithSavedSummary(savedSummaryResult, 'FILE_READ_FAILED');
+        return savedFailureResult || {
             ok: false,
             reason: 'FILE_READ_FAILED'
         };
@@ -142,22 +262,19 @@ async function generateNodeSummary(args) {
 
     const sourceContext = buildSourceContext(fileContents);
     let prompt;
-    let promptForLog;
     try {
         prompt = buildPrompt(nodeId, normalizedFilePath, sourceContext);
-        promptForLog = buildPrompt(nodeId, normalizedFilePath, `<source omitted - see ${normalizedFilePath}>`);
     } catch (error) {
         CrossWayAILog.appendLine(`[NodeSummary] prompt template read failed: ${error.message}`);
-        return {
+        const savedFailureResult = buildFailureWithSavedSummary(savedSummaryResult, 'PROMPT_TEMPLATE_READ_FAILED');
+        return savedFailureResult || {
             ok: false,
             reason: 'PROMPT_TEMPLATE_READ_FAILED'
         };
     }
 
     CrossWayAILog.appendLine(`[NodeSummary] start provider=${resolvedAIClient.provider || 'unknown'} file=${normalizedFilePath}`);
-    CrossWayAILog.appendLine('[NodeSummary] prompt begin');
-    CrossWayAILog.appendLine(promptForLog);
-    CrossWayAILog.appendLine('[NodeSummary] prompt end');
+    CrossWayAILog.appendLine('[NodeSummary] prompting AI');
 
     try {
         const rawResponse = await resolvedAIClient.complete(prompt);
@@ -165,7 +282,8 @@ async function generateNodeSummary(args) {
 
         if (!summary) {
             CrossWayAILog.appendLine('[NodeSummary] empty AI response');
-            return {
+            const savedFailureResult = buildFailureWithSavedSummary(savedSummaryResult, 'EMPTY_AI_RESPONSE');
+            return savedFailureResult || {
                 ok: false,
                 reason: 'EMPTY_AI_RESPONSE'
             };
@@ -175,23 +293,27 @@ async function generateNodeSummary(args) {
             const oldestKey = summaryCache.keys().next().value;
             summaryCache.delete(oldestKey);
         }
-        summaryCache.set(cacheKey, summary);
-        return {
-            ok: true,
-            summary
-        };
+
+        const summaryTimestamp = formatSummaryTimestamp();
+        const summaryResult = buildSummaryResult(summary, summaryTimestamp, stats);
+        summaryCache.set(cacheKey, summaryResult);
+        saveNodeSummary(normalizedFilePath, summary, summaryTimestamp, CrossWayAILog);
+        return summaryResult;
+
     } catch (error) {
         CrossWayAILog.appendLine(`[NodeSummary] AI failed: ${error.message}`);
         const reason = error?.summaryReason || error?.code || '';
-        return {
+        const normalizedReason = [
+            'NO_AI_PROVIDER',
+            'VSCODE_LM_QUOTA_EXHAUSTED',
+            'OPENAI_QUOTA_EXHAUSTED'
+        ].includes(reason)
+            ? reason
+            : 'AI_GENERATION_FAILED';
+        const savedFailureResult = buildFailureWithSavedSummary(savedSummaryResult, normalizedReason);
+        return savedFailureResult || {
             ok: false,
-            reason: [
-                'NO_AI_PROVIDER',
-                'VSCODE_LM_QUOTA_EXHAUSTED',
-                'OPENAI_QUOTA_EXHAUSTED'
-            ].includes(reason)
-                ? reason
-                : 'AI_GENERATION_FAILED'
+            reason: normalizedReason
         };
     }
 }

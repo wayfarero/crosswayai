@@ -31,11 +31,11 @@ IF FILE-INFO:FULL-PATHNAME = ? THEN
 
 /*------------------------------------------------------------------------
     Purpose     : Dumps database schema in the Proparse-expected text format.
-    Description : Writes table and field metadata for the currently aliased 
-                  DICTDB database. The dumpMode parameter controls whether 
+    Description : Writes table and field metadata for the currently aliased
+                  DICTDB database. The dumpMode parameter controls whether
                   to dump user tables ("user") or system/meta tables ("dictdb").
     Notes       : Called from the dumpDfFile.template during DB definition dumps.
-                  The database number in the header is always written as "1" for 
+                  The database number in the header is always written as "1" for
                   user mode. The correct sequential numbering is applied later
                   by the JavaScript concatenation step.
   ----------------------------------------------------------------------*/

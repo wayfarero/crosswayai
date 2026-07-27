@@ -274,12 +274,14 @@ function showEdgeTooltip(items, event, metadataKey = null) {
         // Add double-click handler to detail title
         const detailTitle = edgeTooltipDetail.querySelector('.detail-title');
         const detailSection = li.getAttribute('data-section') || getEdgeTooltipSection(li.getAttribute('data-original') || callItemName);
-        const detailTargetType = detailSection === 'run' ? 'procedure' : 'method';
+        const detailTargetType = detailSection === 'run' ? 'procedure' : (detailSection === 'constructor' ? 'constructor' : 'method');
         if (detailTitle) {
           detailTitle.addEventListener('dblclick', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            handleEdgeTooltipDoubleClick(metadataKey, callItemName, '', detailTargetType);
+            // The title is the method name without a chosen overload: pass
+            // undefined (name-only match) rather than "" (no-parameter overload).
+            handleEdgeTooltipDoubleClick(metadataKey, callItemName, undefined, detailTargetType);
           });
         }
 
@@ -294,7 +296,8 @@ function showEdgeTooltip(items, event, metadataKey = null) {
             if (entries[idx]) {
               sig = entries[idx].replace(/^\(|\)$/g, '').trim(); // Remove surrounding parens
             }
-            const signatureForOpen = detailTargetType === 'procedure' ? '' : sig;
+            // Empty string is meaningful here: it targets the no-parameter overload.
+            const signatureForOpen = detailTargetType === 'procedure' ? undefined : sig;
             handleEdgeTooltipDoubleClick(metadataKey, callItemName, signatureForOpen, detailTargetType);
           });
         });
@@ -378,7 +381,7 @@ function showEdgeTooltip(items, event, metadataKey = null) {
         event.preventDefault();
         event.stopPropagation();
         let targetName = li.getAttribute('data-method') || '';
-        const signatureRaw = li.getAttribute('data-signature') || '';
+        const signatureRaw = li.getAttribute('data-signature');
         const originalText = li.getAttribute('data-original') || li.textContent || targetName;
         const section = li.getAttribute('data-section') || getEdgeTooltipSection(originalText);
         let targetType;
@@ -392,7 +395,12 @@ function showEdgeTooltip(items, event, metadataKey = null) {
         } else {
           targetType = section;
         }
-        handleEdgeTooltipDoubleClick(metadataKey, targetName, '', targetType);
+        const isCallableTarget = targetType === 'method';
+        // Summary rows are name-only unless the edge has exactly one signature.
+        const signatureForOpen = isCallableTarget && signatureRaw !== null && !String(signatureRaw).includes('|||')
+          ? String(signatureRaw)
+          : undefined;
+        handleEdgeTooltipDoubleClick(metadataKey, targetName, signatureForOpen, targetType);
       });
     });
   }

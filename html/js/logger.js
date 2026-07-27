@@ -16,4 +16,4 @@
   window.logger = {
     logToOutput: logToOutput
   };
-})();  
+})();

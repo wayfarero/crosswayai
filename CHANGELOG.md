@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.2
+  - Bug Fixes:
+    - corrected double-click tooltip navigation on Windows to open the right overloaded method/constructor and highlight the full target method, constructor, property, or procedure range
+    - corrected AI disabled/configuration message to use generic AI feature wording for both node summaries and Table Relations diagram
+    - patched existing `.crosswayai/crosswayai_settings.json` files with missing default configuration keys during extension activation while preserving user values
+    - corrected AI node summary generation 
+    - corrected XREF watcher logging
+    - corrected incremental XREF updates to pick up newly added include files and clean stale dependency map entries more reliably
+    - added a warning popup and CrossWayAILog message when dependency map generation finds missing XREF files
+    - corrected AI summary icon visibility so virtual .pl nodes no longer show summary actions
+    - corrected multi-project persistent procedure RUN mapping so persistent procedure files and internal procedure calls appear in Impact and Call diagrams
+    - added logic to close the viewer and remove stale Mermaid diagrams when source files are deleted, including in multi-project workspaces where files may share the same name
+  - Improvements:
+    - documented that AI features use workspace plain text, including source files for AI node summaries and dumped `.df` schema text for Table Relations diagrams
+    - AI node summaries are now persisted in `dsMap.json`, reused before prompting AI again, and can be regenerated from the summary tooltip reload button
+    - Mermaid `.md` diagrams now mirror the original source folder structure (`<project>/<source>/...`) under `.crosswayai/mermaid`, matching the xref layout, so diagrams for files that share a base name across different folders or projects no longer overwrite each other; on activation, old-version `.md` diagrams left directly under `.crosswayai/mermaid` (from before the folder-structured layout) are automatically removed
+    - unified `public-property` and `inherited-property` impact diagram links under the generic `property` label
+    - refactored code for impact and call diagram to increase performance
+
 ## 1.9.1
   - Bug Fixes:
     - corrected the automatic refresh of the `CrossWayAI Viewer` due to previous code refactoring

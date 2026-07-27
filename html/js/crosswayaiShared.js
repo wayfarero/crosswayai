@@ -19,7 +19,11 @@ function openNodeFile(nodeId, targetType, targetName, signature) {
   if (targetName) {
     message.targetName = targetName;
   }
-  if (signature) {
+  // Use an explicit undefined/null check (not truthiness) so that an empty
+  // signature string – which represents the no-parameter overload, e.g. the
+  // "( )" entry – is still forwarded. Dropping it here would make the editor
+  // fall back to the first method definition with that name.
+  if (signature !== null) {
     message.signature = signature;
   }
   // Debug: log the outgoing message for troubleshooting

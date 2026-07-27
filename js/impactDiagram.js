@@ -15,6 +15,23 @@ const {
     edgeDetailLabelExtractor
 } = require('./edgeInfo');
 
+// The impact diagram does not distinguish property visibility: public-property
+// and inherited-property links are unified under the generic "property" keyword.
+const{ PROPERTY_RELATION_ALIASES } = require('./extensionConstants');
+
+function unifyPropertyRelationKeyword(label) {
+    return PROPERTY_RELATION_ALIASES.includes(label.toLowerCase()) ? 'property' : label;
+}
+
+function impactEdgeLabelExtractor(link) {
+    return unifyPropertyRelationKeyword(edgeLabelExtractor(link));
+}
+
+function impactEdgeDetailLabelExtractor(link) {
+    return edgeDetailLabelExtractor(link)
+        .replace(/\((?:public|inherited)-property\)/g, '(property)');
+}
+
 async function generateImpactDiagram(context, uri) {
     return generateDiagram(context, uri, 'impact', generateMermaidImpactGraph);
 }
@@ -47,7 +64,6 @@ function generateMermaidImpactGraph(dsMap, targetNode, graphType = 'LR') {
             lt.startsWith('run') ||
             lt.startsWith('public-property:') ||
             lt.startsWith('inherited-property:') ||
-            lt === 'inherited-property' ||
             lt === 'include' ||
             lt === 'inherits:' ||
             lt === 'implements:' ||
@@ -70,9 +86,9 @@ function generateMermaidImpactGraph(dsMap, targetNode, graphType = 'LR') {
 
     const edges = buildLinkEdgeMap(Array.from(linksToRender), allFileNodes, ensureNodeDeclaration, {
         includeLabels: true,
-        labelExtractor: edgeLabelExtractor,
+        labelExtractor: impactEdgeLabelExtractor,
         includeDetailLabels: true,
-        detailLabelExtractor: edgeDetailLabelExtractor,
+        detailLabelExtractor: impactEdgeDetailLabelExtractor,
         preserveLinkTypeCase: false
     });
 

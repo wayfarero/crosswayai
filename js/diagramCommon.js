@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { buildNodeLabel } = require('./nodeLabel');
-const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { getCrossWayAILog, appendToLogFile } = require('./crosswayaiLogger');
 const diagramColors = require('../resources/diagram-colors.json');
 const { getExclusionsSettings, createExclusionMatcher } = require('./crosswayaiSettings');
 const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
@@ -17,8 +17,8 @@ async function cleanupDirectory(dirPath) {
             await fs.promises.rm(dirPath, { recursive: true, force: true });
             if (CrossWayAILog) CrossWayAILog.appendLine('>Cleaned up directory: ' + dirPath);
         }
-    } catch (e) {
-        if (CrossWayAILog) CrossWayAILog.appendLine('>Warning: Failed to clean up directory: ' + e.message);
+    } catch (error) {
+        if (CrossWayAILog) CrossWayAILog.appendLine('>Warning: Failed to clean up directory: ' + error.message);
     }
 }
 
@@ -53,8 +53,8 @@ async function runABLScript({ context, workspaceRoot, oeversion, scriptName, arg
                 oeversion = defaultRuntime;
                 CrossWayAILog.appendLine(`>oeversion '${defaultRuntime}' picked up from workspace defaultRuntime`);
             }
-        } catch (e) {
-            CrossWayAILog.appendLine(`>runABLScript: failed to read defaultRuntime: ${e.message}`);
+        } catch (error) {
+            CrossWayAILog.appendLine(`>runABLScript: failed to read defaultRuntime: ${error.message}`);
         }
 
         if (!oeversion) {
@@ -147,14 +147,16 @@ function findDsMapFileEntry(dsMap, sourceFilePath) {
     return files.find(file => normalizeFsPath(file.filePath || file.FilePath) === normalizedSource) || null;
 }
 
-function resolveSourceFileLookupContext(sourceFilePath, workspaceRoot) {
+function resolveSourceFileLookupContext(sourceFilePath, workspaceRoot, fileEntry = null) {
 
     if (!sourceFilePath || !workspaceRoot) {
         return null;
     }
 
-    const dsMapJson = getDsMapJsonObject(workspaceRoot);
-    const fileEntry = findDsMapFileEntry(dsMapJson, sourceFilePath);
+    if (!fileEntry) {
+        const dsMapJson = getDsMapJsonObject(workspaceRoot);
+        fileEntry = findDsMapFileEntry(dsMapJson, sourceFilePath);
+    }
     if (!fileEntry) {
         return null;
     }
@@ -233,6 +235,45 @@ function resolveProparseFilePath(sourceFilePath, workspaceRoot) {
     );
 
     return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * Computes the sub-directory (relative to `.crosswayai/mermaid`) under which a
+ * diagram for the given source file should be persisted. The layout mirrors the
+ * `.proparse` convention (`<project>/<source>/<relativeDir>`) so that generated
+ * `.md` files retain their original project paths and files sharing a base name
+ * across folders or projects no longer overwrite each other.
+ *
+ * Returns an empty string when the source file cannot be resolved against the
+ * dsMap (e.g. virtual/external nodes), which preserves the legacy flat layout as
+ * a safe fallback.
+ *
+ * @param {string} sourceFilePath - Absolute path of the diagram's source file.
+ * @param {string} workspaceRoot - The workspace root directory.
+ * @param {Object} [fileEntry] - Pre-resolved dsMap file entry to avoid a re-read.
+ * @returns {string} Relative sub-directory, or '' to use the flat mermaid root.
+ */
+function resolveMermaidRelativeDir(sourceFilePath, workspaceRoot, fileEntry = null) {
+    const lookupContext = resolveSourceFileLookupContext(sourceFilePath, workspaceRoot, fileEntry);
+    if (!lookupContext) {
+        return '';
+    }
+
+    const { projectName, sourceName, relativeSourcePath } = lookupContext;
+    const relativeDir = path.dirname(relativeSourcePath);
+
+    const segments = [];
+    if (projectName) {
+        segments.push(projectName);
+    }
+    if (sourceName) {
+        segments.push(sourceName);
+    }
+    if (relativeDir && relativeDir !== '.') {
+        segments.push(relativeDir);
+    }
+
+    return segments.length > 0 ? path.join(...segments) : '';
 }
 
 function buildNodeDatabaseDetails(dsMap) {
@@ -376,13 +417,44 @@ function getCallLabel(rawLinkType, { includeRelationSuffix = false } = {}) {
     return `${methodLabel} (${signature.relationType})`;
 }
 
+function buildDirectionalLinkIndex(allFileLinks, predicate, { looseEquality = false } = {}) {
+    const keyFor = looseEquality ? (id => String(id)) : (id => id);
+    const linksByParentId = new Map();
+    const linksByChildId = new Map();
+
+    function addLink(map, nodeId, link) {
+        const key = keyFor(nodeId);
+        if (!map.has(key)) {
+            map.set(key, []);
+        }
+        map.get(key).push(link);
+    }
+
+    allFileLinks.forEach(link => {
+        if (!predicate(link)) {
+            return;
+        }
+
+        addLink(linksByParentId, link.ParentNodeId, link);
+        addLink(linksByChildId, link.NodeId, link);
+    });
+
+    return {
+        keyFor,
+        linksByParentId,
+        linksByChildId
+    };
+}
+
 function collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
     direction = 'down',
     visited = new Set(),
     linksToRender = new Set(),
-    looseEquality = false
+    looseEquality = false,
+    linkIndex = null
 } = {}) {
-    const equals = looseEquality ? ((a, b) => a == b) : ((a, b) => a === b); // eslint-disable-line eqeqeq
+    const index = linkIndex || buildDirectionalLinkIndex(allFileLinks, predicate, { looseEquality });
+    const linksByNodeId = direction === 'up' ? index.linksByChildId : index.linksByParentId;
 
     function walk(nodeId) {
         if (!nodeId || visited.has(nodeId)) {
@@ -391,14 +463,7 @@ function collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
 
         visited.add(nodeId);
 
-        const matchingLinks = allFileLinks.filter(link => {
-            if (!predicate(link)) {
-                return false;
-            }
-            return direction === 'up'
-                ? equals(link.NodeId, nodeId)
-                : equals(link.ParentNodeId, nodeId);
-        });
+        const matchingLinks = linksByNodeId.get(index.keyFor(nodeId)) || [];
 
         matchingLinks.forEach(link => {
             linksToRender.add(link);
@@ -418,18 +483,23 @@ function collectBidirectionalLinks(allFileLinks, startNodeId, predicate, options
         looseEqualityUp = false,
         looseEqualityDown = false
     } = options;
+    const sharedIndex = looseEqualityUp === looseEqualityDown
+        ? buildDirectionalLinkIndex(allFileLinks, predicate, { looseEquality: looseEqualityUp })
+        : null;
 
     collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
         direction: 'up',
         visited: upVisited,
         linksToRender,
-        looseEquality: looseEqualityUp
+        looseEquality: looseEqualityUp,
+        linkIndex: sharedIndex
     });
     collectDirectionalLinks(allFileLinks, startNodeId, predicate, {
         direction: 'down',
         visited: downVisited,
         linksToRender,
-        looseEquality: looseEqualityDown
+        looseEquality: looseEqualityDown,
+        linkIndex: sharedIndex
     });
 
     return linksToRender;
@@ -904,14 +974,56 @@ function getDiagramConfig(diagramType) {
     }
 }
 
+function filterExcludedDiagramEntries(dsMap, referencedNode, isExcluded) {
+    const data = (dsMap && dsMap.dsMap) || {};
+    const filteredDsMap = {
+        ...dsMap,
+        dsMap: { ...data }
+    };
+    const filteredData = filteredDsMap.dsMap;
+    const nodes = data.ttFileNode || [];
+
+    const referencedExcluded = !!(referencedNode && referencedNode.FilePath && isExcluded(referencedNode.FilePath));
+
+    const excludedNodeIds = new Set();
+    const excludedClassNames = new Set();
+    for (const node of nodes) {
+        if (node.FilePath && isExcluded(node.FilePath)) {
+            excludedNodeIds.add(node.NodeId);
+            if (node.ClassName) {
+                excludedClassNames.add(String(node.ClassName).toLowerCase());
+            }
+        }
+    }
+
+    if (excludedNodeIds.size > 0) {
+        filteredData.ttFileNode = nodes.filter(node => !excludedNodeIds.has(node.NodeId));
+
+        const links = data.ttFileLink || [];
+        filteredData.ttFileLink = links.filter(link => !excludedNodeIds.has(link.NodeId) && !excludedNodeIds.has(link.ParentNodeId));
+
+        if (Array.isArray(data.ttClassReference) && excludedClassNames.size > 0) {
+            filteredData.ttClassReference = data.ttClassReference.filter(classReference =>
+                !excludedClassNames.has(String(classReference.ClassName || '').toLowerCase()) &&
+                !excludedClassNames.has(String(classReference.TargetClassName || '').toLowerCase())
+            );
+        }
+    }
+
+    return {
+        dsMap: filteredDsMap,
+        referencedExcluded
+    };
+}
+
 async function generateDiagram(context, uri, diagramType, graphBuilder) {
 
     const { createMermaidViewer } = require('./crosswayaiContainer');
     const { openCrosswayAIViewer, persistMermaid } = createMermaidViewer();
     const CrossWayAILog = getCrossWayAILog();
-    
+
     let config;
-    
+
     try {
         config = getDiagramConfig(diagramType);
     } catch (error) {
@@ -931,33 +1043,33 @@ async function generateDiagram(context, uri, diagramType, graphBuilder) {
 
         const exclusions = getExclusionsSettings(workspaceRoot);
         const isExcluded = createExclusionMatcher(exclusions, workspaceRoot);
-        const nodes = (dsMap.dsMap || {}).ttFileNode || [];
-        const excludedNodeIds = new Set();
-        for (const node of nodes) {
-            if (node.FilePath && isExcluded(node.FilePath)) {
-                excludedNodeIds.add(node.NodeId);
-            }
-        }
-        if (excludedNodeIds.size > 0) {
-            dsMap.dsMap.ttFileNode = nodes.filter(n => !excludedNodeIds.has(n.NodeId));
-            const links = (dsMap.dsMap || {}).ttFileLink || [];
-            dsMap.dsMap.ttFileLink = links.filter(l => !excludedNodeIds.has(l.NodeId) && !excludedNodeIds.has(l.ParentNodeId));
+        const { dsMap: filteredDsMap, referencedExcluded } = filterExcludedDiagramEntries(dsMap, referencedNode, isExcluded);
+
+        // The diagram's own subject is excluded: do not render it (the start node would
+        // otherwise always be drawn). Inform the user instead of producing a misleading diagram.
+        if (referencedExcluded) {
+            const message = `CrossWayAI: "${referencedNode.FileName}" is excluded (see crosswayai_settings.json) ; diagram was not generated.`;
+            CrossWayAILog.appendLine(`>${message}`);
+            appendToLogFile(workspaceRoot, message);
+            vscode.window.showWarningMessage(message);
+            return;
         }
 
         const mermaidGraph = diagramType === 'package'
-            ? graphBuilder(dsMap, referencedNode, workspaceRoot)
-            : graphBuilder(dsMap, referencedNode);
+            ? graphBuilder(filteredDsMap, referencedNode, workspaceRoot)
+            : graphBuilder(filteredDsMap, referencedNode);
 
         if (!mermaidGraph) {
             return;
         }
 
-        const nodeDetails = buildNodeDatabaseDetails(dsMap);
+        const nodeDetails = buildNodeDatabaseDetails(filteredDsMap);
         const graphWithNodeDetails = Object.keys(nodeDetails).length > 0
             ? `%%CROSSWAY_NODE_DETAILS:${JSON.stringify(nodeDetails)}\n${mermaidGraph}`
             : mermaidGraph;
         const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, referencedNode);
-        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, referencedNode.FileName, graphWithMetadata);
+        const mermaidRelativeDir = resolveMermaidRelativeDir(referencedNode.FilePath, workspaceRoot, referencedNode);
+        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, referencedNode.FileName, graphWithMetadata, mermaidRelativeDir);
         if (savedPath) {
             await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
             vscode.window.showInformationMessage(`Mermaid diagram saved: ${savedPath}`);
@@ -977,7 +1089,7 @@ function getRelativeFolderPath(relPath, projectName, sourceDir) {
     if (!relPath) {
         return '';
     }
-    const displaySeparator = '\\';
+    const displaySeparator = '/';
     let stripped = String(relPath).replace(/[\\/]+/g, '/');
     if (projectName) {
         const projectPrefix = String(projectName).replace(/[\\/]+/g, '/') + '/';
@@ -1023,7 +1135,6 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
             return "class";
         }
 
-        // Check if node is virtual first
         if (node.Virtual === true) {
             return "virtual";
         }
@@ -1075,7 +1186,7 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
 
             const projectName = node.project || node.Project || '';
             const sourceDir = node.source || node.Source || '';
-            const augumentedNode = {
+            const augmentedNode = {
                 ...node,
                 isRefNode: isReferencedNode(node, referencedNode),
                 LabelPrefix: getNodePrefix(node),
@@ -1083,7 +1194,7 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
                 SourceDirectory: sourceDir,
                 RelativeFolderPath: getRelativeFolderPath(node.FileRelPath || '', projectName, sourceDir)
             };
-            const label = buildNodeLabel(augumentedNode);
+            const label = buildNodeLabel(augmentedNode);
             const nodeType = resolveNodeType(node);
 
             writeNode(nodeId, label, nodeType);
@@ -1113,70 +1224,61 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
             .toLowerCase();
     }
 
-    function resolveEdgeColor(linkTypeInput) {
+    function toLinkTypeArray(linkTypeInput) {
         if (!linkTypeInput) {
-            return LINK_COLORS.undefined;
+            return [];
         }
 
-        const values = Array.isArray(linkTypeInput)
-            ? linkTypeInput
-            : (linkTypeInput instanceof Set ? Array.from(linkTypeInput) : [linkTypeInput]);
+        if (Array.isArray(linkTypeInput)) {
+            return linkTypeInput;
+        }
 
-        const normalizedTypes = Array.from(new Set(
-            values
+        return linkTypeInput instanceof Set ? Array.from(linkTypeInput) : [linkTypeInput];
+    }
+
+    function collapseLinkType(linkType) {
+        if (linkType === "run" || linkType === "invoke") {
+            return "call";
+        }
+
+        if (linkType === "property" || linkType === "public-property" || linkType === "inherited-property") {
+            return "property";
+        }
+
+        return linkType;
+    }
+
+    function getNormalizedLinkTypes(linkTypeInput) {
+        return Array.from(new Set(
+            toLinkTypeArray(linkTypeInput)
                 .map(normalizeLinkType)
                 .filter(Boolean)
+                .map(collapseLinkType)
         ));
+    }
 
-        if (normalizedTypes.length === 0) {
-            return LINK_COLORS.undefined;
-        }
-
-        // run and invoke are intentionally rendered with the same color.
-        // property, public-property and inherited-property are also collapsed into the same color to reduce noise.
-        const collapsedTypes = Array.from(new Set(
-            normalizedTypes.map((type) => {
-                if (type === "run" || type === "invoke") {
-                    return "call";
-                }
-
-                if (type === "property" || type === "public-property" || type === "inherited-property") {
-                    return "property";
-                }
-
-                return type;
-            })
-        ));
-
-        if (collapsedTypes.includes("circular")) {
+    function resolveSingleEdgeColor(linkType) {
+        if (linkType === "circular") {
             return LINK_COLORS.circular;
         }
 
-        if (collapsedTypes.length === 1) {
-            const singleType = collapsedTypes[0];
-            if (singleType === "extends") {
-                return LINK_COLORS.inherits;
-            }
-            return LINK_COLORS[singleType] || LINK_COLORS.undefined;
+        if (linkType === "extends") {
+            return LINK_COLORS.inherits;
         }
 
-        // Mixed relationship types on the same edge -> undefined/multiple color.
-        return LINK_COLORS.undefined;
+        return LINK_COLORS[linkType] || LINK_COLORS.undefined;
     }
 
-    function lightenColor(hex, percent) {
+    function resolveEdgeColor(linkTypeInput) {
+        const linkTypes = getNormalizedLinkTypes(linkTypeInput);
 
-        const num = parseInt(hex.replace("#",""),16);
+        if (linkTypes.includes("circular")) {
+            return LINK_COLORS.circular;
+        }
 
-        let r = (num >> 16);
-        let g = (num >> 8) & 255;
-        let b = num & 255;
-
-        r = Math.min(255, Math.floor(r + (255 - r) * percent));
-        g = Math.min(255, Math.floor(g + (255 - g) * percent));
-        b = Math.min(255, Math.floor(b + (255 - b) * percent));
-
-        return "#" + (r << 16 | g << 8 | b).toString(16).padStart(6,"0");
+        return linkTypes.length === 1
+            ? resolveSingleEdgeColor(linkTypes[0])
+            : LINK_COLORS.undefined;
     }
 
     const startNodeName = ensureNodeDeclaration(referencedNode);
@@ -1199,7 +1301,7 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
         const sourceId = getMermaidNodeId(sourceNode);
         const destId = getMermaidNodeId(destNode);
 
-        const color = resolveEdgeColor(edgeLinkType || relationType || label);
+        const color = resolveEdgeColor(edgeLinkType || label);
 
         let safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
 
@@ -1238,6 +1340,7 @@ module.exports = {
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,
+    filterExcludedDiagramEntries,
     runABLScript,
     toMermaidNodeId,
     normalizeFsPath,
@@ -1248,6 +1351,7 @@ module.exports = {
     findDsMapFileEntry,
     resolveXrefFilePath,
     resolveProparseFilePath,
+    resolveMermaidRelativeDir,
     buildNodeDatabaseDetails,
     getFirstLinkTypeEntry,
     parseCallSignature,

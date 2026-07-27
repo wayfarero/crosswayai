@@ -1,5 +1,4 @@
 const vscode = require('vscode');
-const fs = require('fs');
 const path = require('path');
 const { generateDependencyMap } = require('./dependencyMap');
 const { setupXrefWatcher } = require('./xrefWatcher');
@@ -12,7 +11,8 @@ const { generatePackageDiagram } = require('./packageDiagram');
 const { generateInstanceChainDiagram } = require('./instanceChainDiagram');
 const { generatePropertyAccessDiagram } = require('./propertyAccessDiagram');
 const { generateTableRelationsDiagram } = require('./tableRelationsDiagram');
-const { createMermaidViewer } = require('./crosswayaiContainer');
+const { createMermaidViewer, cleanupLegacyMermaidDiagrams } = require('./crosswayaiContainer');
+const { removeMermaidDiagramsForSourceFile } = require('./mermaidCleanup');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 const { getWorkspaceRoot } = require('./workspaceProjects');
 const { openXrefFile, openProparseFile } = require('./fileHandling');
@@ -20,49 +20,34 @@ const { proparseAllProjects } = require('./proparseRunner');
 const { ensureProparserCompiled } = require('./proparseContext');
 const { setCrossWayAILog } = require('./crosswayaiLogger');
 const { setRefreshActiveMermaidDiagramHandler } = require('./mermaidRefreshState');
+const { ensureSettingsFile } = require('./crosswayaiSettings');
 
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
 setCrossWayAILog(CrossWayAILog);
-const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible } = createMermaidViewer();
+const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible, closeMermaidViewerForFile } = createMermaidViewer();
 
 let activeGeneratedDiagram = null;
 
-/**
- * Ensures the default extension settings file exists.
- * Copies the template from resources if .crosswayai/crosswayai_settings.json does not exist.
- * @param {vscode.ExtensionContext} context
- */
-function ensureDefaultExtensionSettings(context) {
+function ensureWorkspaceSettingsFile(workspaceRoot = getWorkspaceRoot()) {
     try {
-        const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot) {
             return;
         }
 
-        const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
-        const settingsPath = path.join(crosswayaiDir, 'crosswayai_settings.json');
+        const settingsPath = path.join(workspaceRoot, '.crosswayai', 'crosswayai_settings.json');
+        const result = ensureSettingsFile(settingsPath);
 
-        // If settings file already exists, do nothing
-        if (fs.existsSync(settingsPath)) {
+        if (result.created) {
+            CrossWayAILog.appendLine(`Created default settings file at ${settingsPath}`);
             return;
         }
 
-        // Create .crosswayai directory if it doesn't exist
-        if (!fs.existsSync(crosswayaiDir)) {
-            fs.mkdirSync(crosswayaiDir, { recursive: true });
-        }
-
-        // Copy default settings from resources
-        const defaultSettingsPath = path.join(context.extensionPath, 'resources', 'crosswayai_settings.json');
-        if (fs.existsSync(defaultSettingsPath)) {
-            fs.copyFileSync(defaultSettingsPath, settingsPath);
-            CrossWayAILog.appendLine(`Created default settings file at ${settingsPath}`);
-        } else {
-            CrossWayAILog.appendLine(`Warning: Default settings template not found at ${defaultSettingsPath}`);
+        if (result.patched) {
+            CrossWayAILog.appendLine(`Patched workspace settings at ${settingsPath}: added ${result.addedPaths.join(', ')}`);
         }
     } catch (error) {
-        CrossWayAILog.appendLine(`Warning: Failed to ensure default settings file: ${error.message}`);
+        CrossWayAILog.appendLine(`Warning: Failed to ensure workspace settings file: ${error.message}`);
     }
 }
 
@@ -72,8 +57,15 @@ function ensureDefaultExtensionSettings(context) {
 function activate(context) {
     CrossWayAILog.appendLine("CrossWayAI extension is now active!");
 
-    // Ensure default settings file exists
-    ensureDefaultExtensionSettings(context);
+    // Resolve the workspace root once so a no-workspace activation surfaces the
+    // "No workspace folder found" error at most once across the operations below.
+    const workspaceRoot = getWorkspaceRoot();
+
+    // Ensure default workspace settings are present.
+    ensureWorkspaceSettingsFile(workspaceRoot);
+
+    // Remove old version flat .md diagrams left over from before the folder-structured layout.
+    cleanupLegacyMermaidDiagrams(workspaceRoot);
 
     const proparserCompilePromise = ensureProparserCompiled(context).catch(error => {
         CrossWayAILog.appendLine(`>Proparse: Unexpected Proparser compile check error: ${error.message}`);
@@ -123,6 +115,22 @@ function activate(context) {
     const handleOpenXrefFile = (ctx, uri) => openXrefFile(uri);
     const handleOpenProparseFile = (ctx, uri) => openProparseFile(uri);
 
+    const handleFileDelete = (uri) => {
+        if (!uri || !uri.fsPath) {
+            return;
+        }
+
+        const deletedFilePath = uri.fsPath;
+        const workspaceRoot = getWorkspaceRoot();
+        const removedDiagramPaths = removeMermaidDiagramsForSourceFile(workspaceRoot, deletedFilePath);
+
+        if (removedDiagramPaths.length > 0) {
+            closeMermaidViewerForFile(workspaceRoot, removedDiagramPaths);
+            CrossWayAILog.appendLine(`Removed ${removedDiagramPaths.length} Mermaid diagram file(s) for deleted source: ${deletedFilePath}`);
+            CrossWayAILog.show(true);
+        }
+    };
+
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
         { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram, trackDiagram: true },
@@ -144,11 +152,17 @@ function activate(context) {
 
     setupXrefWatcher(context);
 
+    const fileDeleteDisposable = vscode.workspace.onDidDeleteFiles((event) => {
+        event.files.forEach(handleFileDelete);
+    });
+
+    context.subscriptions.push(fileDeleteDisposable);
+
     commands.forEach(command => {
         let disposableCommand;
         if (command.handler) {
             disposableCommand = vscode.commands.registerCommand(command.name, async (uri) => {
-                ensureDefaultExtensionSettings(context);
+                ensureWorkspaceSettingsFile();
                 const sourceUri = command.trackDiagram
                     ? (uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri))
                     : null;

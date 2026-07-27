@@ -35,8 +35,28 @@ const DEFAULT_DLC_PROPATH_ENTRIES = [
     'gui/protools.pl'
 ];
 
+const PROPERTY_RELATION_ALIASES = [ 
+    'public-property', 
+    'inherited-property' 
+];
+
+const SUPPORTED_SOURCE_EXTENSIONS = new Set(['.p', '.cls', '.w', '.i']);
+const DIAGRAM_PREFIXES = [
+    'impact',
+    'include',
+    'interface',
+    'call',
+    'inheritance',
+    'package',
+    'instance_chain',
+    'property_access'
+];
+
 module.exports = {
     KNOWN_OE_VERSIONS,
     FILE_TYPES,
-    DEFAULT_DLC_PROPATH_ENTRIES
+    DEFAULT_DLC_PROPATH_ENTRIES,
+    PROPERTY_RELATION_ALIASES,
+    SUPPORTED_SOURCE_EXTENSIONS,
+    DIAGRAM_PREFIXES
 };

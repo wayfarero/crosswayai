@@ -32,7 +32,13 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 ## AI Configuration
 
 In order to use the integrated AI support you need to set the AI enabled = true (disabled by default)
-CrossWayAI supports both external AI providers (OpenAI-compatible APIs) and VS Code Language Models.
+CrossWayAI supports both external AI providers (OpenAI-compatible Chat Completions APIs) and VS Code Language Models.
+The HTTP provider does not support native provider APIs with different endpoint shapes, such as Anthropic Claude's `/v1/messages`, unless they are exposed through an OpenAI-compatible proxy.
+
+CrossWayAI AI features are grounded in the plain text files in your workspace. For example, AI node summaries read the selected ABL source file (`.p`, `.w`, `.cls`, or `.i`) as text and send it directly to the configured AI provider for a functional summary. The Table Relations Diagram works differently: it hands a prompt to the VS Code Chat agent, which reads the dumped `.df` schema text created by `CrossWayAI: Dump All DB Definitions`. That schema text is therefore processed by whichever model backs VS Code Chat, which may not be the provider configured for CrossWayAI. Either way, providing the actual source and schema text helps the AI produce more precise summaries and diagrams.
+
+By enabling and using AI features, you are responsible for deciding whether your source code, schema files, database metadata, and other workspace content may be sent to the configured AI provider. CrossWayAI does not control how external AI providers or VS Code language models process, store, retain, train on, or secure that data. Review your provider's terms, privacy policy, and your organization's security rules before enabling AI features. Do not use AI features with confidential, regulated, customer-owned, or otherwise sensitive code or data unless you are authorized to share that content with the configured AI service.
+
 For detailed setup instructions, see: [AI Configuration Guide](./resources/AI_CONFIGURATION.md)
 
 ## Java Configuration
@@ -47,6 +53,11 @@ To use Proparse support, you need to have a correctly installed and configured J
 >
 > **Complete the [OpenEdge ABL extension setup](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp)
 > first** and make sure your project compiles successfully before running CrossWayAI.
+
+CrossWayAI watches generated `.xref` files after the dependency map is available. The
+`CrossWayAILog` output may show diagnostic `XREF created`, `XREF updated`, or
+`XREF deleted` messages for pending file watcher events; duplicate events for the
+same xref are collapsed before incremental analysis updates the dependency data.
 
 ## Getting Started
 
@@ -110,12 +121,25 @@ and via context menus:
 
 ## Release Notes
 
-### 1.9.1
+### 1.9.2
   - Bug Fixes:
-    - corrected the automatic refresh of the `CrossWayAI Viewer` due to previous code refactoring
-    - corrected .pl class nodes not showing the relative path under unix environment
-    - corrected Proparse javac usage under linux
-    
+    - corrected double-click tooltip navigation on Windows to open the right overloaded method/constructor and highlight the full target method, constructor, property, or procedure range
+    - corrected AI disabled/configuration message to use generic AI feature wording for both node summaries and Table Relations diagram
+    - patched existing `.crosswayai/crosswayai_settings.json` files with missing default configuration keys during extension activation while preserving user values
+    - corrected AI node summary generation 
+    - corrected XREF watcher logging
+    - corrected incremental XREF updates to pick up newly added include files and clean stale dependency map entries more reliably
+    - added a warning popup and CrossWayAILog message when dependency map generation finds missing XREF files
+    - corrected AI summary icon visibility so virtual .pl nodes no longer show summary actions
+    - corrected multi-project persistent procedure RUN mapping so persistent procedure files and internal procedure calls appear in Impact and Call diagrams
+    - added logic to close the viewer and remove stale Mermaid diagrams when source files are deleted, including in multi-project workspaces where files may share the same name
+  - Improvements:
+    - documented that AI features use workspace plain text, including source files for AI node summaries and dumped `.df` schema text for Table Relations diagrams
+    - AI node summaries are now persisted in `dsMap.json`, reused before prompting AI again, and can be regenerated from the summary tooltip reload button
+    - Mermaid `.md` diagrams now mirror the original source folder structure (`<project>/<source>/...`) under `.crosswayai/mermaid`, matching the xref layout, so diagrams for files that share a base name across different folders or projects no longer overwrite each other; on activation, old-version `.md` diagrams left directly under `.crosswayai/mermaid` (from before the folder-structured layout) are automatically removed
+    - unified `public-property` and `inherited-property` impact diagram links under the generic `property` label
+    - refactored code for impact and call diagram to increase performance
+
 For the full release history, see the [CHANGELOG](./CHANGELOG.md).
 ---
 

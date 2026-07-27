@@ -24,7 +24,7 @@ function buildNodeLabel(augumentedNode) {
 
     const parts = [escapedProject, escapedSourceDir, escapedRelFolder].filter(Boolean);
     if (parts.length > 0) {
-        return `${escapedFirst}\\n${parts.join('\\')}`;
+        return `${escapedFirst}\\n${parts.join('/')}`;
     }
     return escapedFirst;
 }

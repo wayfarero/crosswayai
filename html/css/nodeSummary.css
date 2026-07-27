@@ -67,10 +67,35 @@
     #nodeSummaryPopover .summary-footer {
       flex: 0 0 auto;
       display: flex;
-      justify-content: flex-end;
+      gap: 6px;
+      align-items: center;
+      justify-content: space-between;
       margin-top: 10px;
     }
-    #nodeSummaryPopover .summary-copy {
+    #nodeSummaryPopover .summary-footer-left {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+    #nodeSummaryPopover .summary-footer-actions {
+      flex: 0 0 auto;
+      display: inline-flex;
+      gap: 6px;
+    }
+    #nodeSummaryPopover .summary-timestamp {
+      display: block;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #nodeSummaryPopover .summary-timestamp-stale {
+      color: #facc15;
+    }
+    #nodeSummaryPopover .summary-copy,
+    #nodeSummaryPopover .summary-reload {
       width: 28px;
       height: 28px;
       display: inline-flex;
@@ -84,10 +109,15 @@
       font-size: 14px;
       line-height: 1;
     }
-    #nodeSummaryPopover .summary-copy:hover {
+    #nodeSummaryPopover .summary-copy:hover,
+    #nodeSummaryPopover .summary-reload:hover {
       background: rgba(30, 41, 59, 0.98);
       color: #f8fafc;
     }
     #nodeSummaryPopover .summary-error {
       color: #fca5a5;
+    }
+    #nodeSummaryPopover .summary-generation-error {
+      flex: 0 0 auto;
+      margin-bottom: 8px;
     }

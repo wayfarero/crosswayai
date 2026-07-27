@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const vscode = require('vscode');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { normalizeFsPath } = require('./dsMapStore');
 
 function normalizeConfigValue(value) {
     if (value === undefined || value === null) {
@@ -150,8 +151,19 @@ function buildDsMapFileEntry(projectRoot, sourceDir, filePath, projectName) {
         fileName: path.basename(filePath),
         filePath,
         source,
-        project: projectName
+        project: projectName,
+        aiSummary: '',
+        aiSummaryTimestamp: null
     };
+}
+
+function resolveSourceDirsFromPaths(projectRoot, sourcePaths) {
+    return sourcePaths.map(sourceDir => {
+        const normalizedSourceDir = sourceDir.replace(/[\\/]/g, path.sep);
+        return path.isAbsolute(normalizedSourceDir)
+            ? path.resolve(normalizedSourceDir)
+            : path.resolve(projectRoot, normalizedSourceDir);
+    });
 }
 
 function resolveProjectSourceDirs(projectRoot) {
@@ -165,12 +177,7 @@ function resolveProjectSourceDirs(projectRoot) {
     }
 
     const sourceDirs = getProjectSourceDirs(cfg);
-    return sourceDirs.map(sourceDir => {
-        const normalizedSourceDir = sourceDir.replace(/[\\/]/g, path.sep);
-        return path.isAbsolute(normalizedSourceDir)
-            ? path.resolve(normalizedSourceDir)
-            : path.resolve(projectRoot, normalizedSourceDir);
-    });
+    return resolveSourceDirsFromPaths(projectRoot, sourceDirs);
 }
 
 /**
@@ -310,8 +317,9 @@ async function findSourceFiles(projectRoot, sourceDirs = [], projectName) {
     return { dsMap: { ttFile } };
 }
 
-async function collectWorkspaceSourceFiles(workspaceFolders, workspaceRoot) {
+async function collectWorkspaceSourceScan(workspaceFolders, workspaceRoot) {
     const collectedFiles = [];
+    const scannedSourceDirs = [];
 
     for (const folder of workspaceFolders || []) {
         const projectRoot = folder.uri.fsPath;
@@ -324,12 +332,81 @@ async function collectWorkspaceSourceFiles(workspaceFolders, workspaceRoot) {
         const projectSubPath = path.relative(workspaceRoot, projectRoot) || '';
         const projectCfg = loadOpenEdgeProjectConfig(folder);
         const sourcePaths = getProjectSourceDirs(projectCfg);
+        const sourceDirs = resolveSourceDirsFromPaths(projectRoot, sourcePaths)
+            .filter(sourceDir => fs.existsSync(sourceDir));
 
         const dsMap = await findSourceFiles(projectRoot, sourcePaths, projectSubPath);
         collectedFiles.push(...((dsMap.dsMap && dsMap.dsMap.ttFile) || []));
+        scannedSourceDirs.push(...sourceDirs);
     }
 
-    return collectedFiles;
+    return {
+        files: collectedFiles,
+        scannedSourceDirs
+    };
+}
+
+async function collectWorkspaceSourceFiles(workspaceFolders, workspaceRoot) {
+    const scan = await collectWorkspaceSourceScan(workspaceFolders, workspaceRoot);
+    return scan.files;
+}
+
+/**
+ * Mutates dsMapJson.dsMap.ttFile in place so callers can persist it before
+ * running incremental analysis.
+ */
+async function syncDsMapFilesWithWorkspace(dsMapJson, workspaceRoot) {
+    if (!dsMapJson || !dsMapJson.dsMap) {
+        return { updated: false, added: [], removed: [] };
+    }
+
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    const workspaceSourceScan = await collectWorkspaceSourceScan(workspaceFolders, workspaceRoot);
+    const currentFiles = workspaceSourceScan.files;
+    const scannedSourceDirs = workspaceSourceScan.scannedSourceDirs;
+
+    const scannedPrefixes = scannedSourceDirs.map(dir => normalizeFsPath(dir) + path.sep);
+    const isUnderScannedSourceDir = (filePath) => {
+        const normalized = normalizeFsPath(filePath);
+        return scannedPrefixes.some(prefix => normalized.startsWith(prefix));
+    };
+
+    const currentEntriesByPath = new Map();
+    for (const entry of currentFiles) {
+        currentEntriesByPath.set(normalizeFsPath(entry.filePath), entry);
+    }
+
+    const existingFiles = Array.isArray(dsMapJson.dsMap.ttFile) ? dsMapJson.dsMap.ttFile : [];
+    const keptFiles = [];
+    const keptPaths = new Set();
+    const added = [];
+    const removed = [];
+
+    for (const entry of existingFiles) {
+        const filePath = entry.filePath || entry.FilePath || '';
+        const key = normalizeFsPath(filePath);
+
+        if (currentEntriesByPath.has(key)) {
+            keptFiles.push(entry);
+            keptPaths.add(key);
+        } else if (isUnderScannedSourceDir(filePath)) {
+            removed.push(filePath);
+        } else {
+            keptFiles.push(entry);
+            keptPaths.add(key);
+        }
+    }
+
+    for (const [key, entry] of currentEntriesByPath) {
+        if (!keptPaths.has(key)) {
+            keptFiles.push(entry);
+            added.push(entry.filePath);
+        }
+    }
+
+    dsMapJson.dsMap.ttFile = keptFiles;
+
+    return { updated: added.length > 0 || removed.length > 0, added, removed };
 }
 
 module.exports = {
@@ -346,5 +423,6 @@ module.exports = {
     resolveProjectSourceDirs,
     findSourceFiles,
     collectWorkspaceSourceFiles,
+    syncDsMapFilesWithWorkspace,
     resolveWorkspaceRoot
 };

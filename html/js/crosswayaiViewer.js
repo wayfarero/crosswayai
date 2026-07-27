@@ -175,7 +175,7 @@
       clearAllPinnedEdgeTooltips();
 
 
-      function openNodeProparseFile(nodeId) { 
+      function openNodeProparseFile(nodeId) {
         const filePath = (window.CROSSWAY_FILE_MAP || {})[nodeId];
         if (!filePath) {
           return false;
@@ -872,6 +872,8 @@
           const nodeContext = resolveNodeSummaryContext(node);
           if (nodeContext) {
             showNodeSummaryButton(nodeContext);
+          } else if (!nodeSummaryPinnedContext && !nodeSummaryLockedContext) {
+            hideNodeSummaryButton(true);
           }
           if (isNodeTooltipPinned()) {
             return;

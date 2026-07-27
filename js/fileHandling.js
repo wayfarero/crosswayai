@@ -14,7 +14,22 @@ function normalizeSignatureText(sig) {
     return String(sig || '').replace(/\s+/g, '').toLowerCase();
 }
 
+function stripTypeNamespace(typeToken) {
+    // Source method definitions frequently use the short class name (e.g.
+    // "TeamMember") thanks to USING statements, while the diagram-provided
+    // signature carries the fully qualified name (e.g.
+    // "Enterprise.HR.Role.TeamMember"). Reduce both to the final dotted
+    // segment so the two forms resolve to the same overload.
+    const token = String(typeToken || '').trim();
+    if (!token) {
+        return '';
+    }
+    const segments = token.split('.');
+    return segments[segments.length - 1];
+}
+
 function extractParamTypeSequence(sig) {
+    // Compare overloads by parameter types when source text and diagram text differ.
     return String(sig || '')
         .split(',')
         .map((rawPart) => {
@@ -25,7 +40,7 @@ function extractParamTypeSequence(sig) {
 
             const afterAs = part.match(/\bas\b\s+([\w.-]+)/i);
             if (afterAs && afterAs[1]) {
-                return afterAs[1].toLowerCase();
+                return stripTypeNamespace(afterAs[1].toLowerCase());
             }
 
             const tokens = part.split(/\s+/).filter(Boolean);
@@ -33,7 +48,7 @@ function extractParamTypeSequence(sig) {
                 return '';
             }
 
-            return tokens[tokens.length - 1].replace(/[^\w.-]/g, '');
+            return stripTypeNamespace(tokens[tokens.length - 1].replace(/[^\w.-]/g, ''));
         })
         .filter(Boolean)
         .join(',');
@@ -42,63 +57,137 @@ function extractParamTypeSequence(sig) {
 function signatureMatches(defSig, targetSig) {
     const normalizedDef = normalizeSignatureText(defSig);
     const normalizedTarget = normalizeSignatureText(targetSig);
-    if (normalizedDef && normalizedTarget && normalizedDef === normalizedTarget) {
+    // Exact textual match. This intentionally also matches the no-parameter
+    // overload, where both the definition and the target normalize to "".
+    if (normalizedDef === normalizedTarget) {
         return true;
     }
 
     const defTypes = extractParamTypeSequence(defSig);
     const targetTypes = extractParamTypeSequence(targetSig);
-    return Boolean(defTypes && targetTypes && defTypes === targetTypes);
+    return defTypes === targetTypes && defTypes !== '';
+}
+
+function getCallableDefinition(lineText, targetName) {
+    const text = String(lineText || '');
+    const name = String(targetName || '').trim();
+    if (!name) {
+        return null;
+    }
+
+    // Parse a callable declaration generically: method, constructor, function, etc.
+    const declarationMatch = text.match(/^\s*([a-z][\w-]*)\b([\s\S]*?)\(([^)]*)\)\s*([:.])?/i);
+    if (!declarationMatch) {
+        return null;
+    }
+
+    const prefix = declarationMatch[2] || '';
+    const nameMatch = prefix.match(new RegExp(`\\b${escapeRegExp(name)}\\b\\s*$`, 'i'));
+    if (!nameMatch) {
+        return null;
+    }
+
+    const beforeName = prefix.slice(0, nameMatch.index).trim();
+    const opensBlock = declarationMatch[4] === ':';
+
+    return {
+        kind: declarationMatch[1].toLowerCase(),
+        name,
+        signature: declarationMatch[3] || '',
+        opensBlock,
+        hasDeclarationPrefix: Boolean(beforeName)
+    };
+}
+
+function findCallableEndLine(doc, startLine, blockKind) {
+    if (!blockKind) {
+        return -1;
+    }
+
+    const endBlockRegex = new RegExp(`^end\\s+${escapeRegExp(blockKind)}\\.$`, 'i');
+    for (let i = startLine + 1; i < doc.lineCount; i++) {
+        const lineText = doc.lineAt(i).text.trim();
+        if (endBlockRegex.test(lineText)) {
+            return i;
+        }
+    }
+
+    return -1;
 }
 
 function findMethodRange(doc, methodName, signature) {
-    let startLine = 0;
-    let found = false;
-    const signatureCandidates = String(signature || '')
-        .split('|||')
-        .map((entry) => String(entry || '').trim())
-        .filter(Boolean);
+    const targetName = String(methodName || '').trim();
+    if (!targetName) {
+        return [0, 0];
+    }
+    const targetNameLower = targetName.toLowerCase();
 
+    const hasSignature = signature !== null;
+    // undefined/null means name-only lookup; "" is a real no-parameter overload.
+    const signatureCandidates = hasSignature
+        ? String(signature).split('|||').map((entry) => String(entry || '').trim())
+        : [];
+
+    function getRangeCandidate(lineIndex, requireSignatureMatch) {
+        const lineText = doc.lineAt(lineIndex).text;
+        const callableDef = getCallableDefinition(lineText, targetName);
+        if (!callableDef || callableDef.name.toLowerCase() !== targetNameLower) {
+            return null;
+        }
+
+        if (requireSignatureMatch) {
+            const matchedCandidate = signatureCandidates.some((candidate) => signatureMatches(callableDef.signature, candidate));
+            if (!matchedCandidate) {
+                return null;
+            }
+        }
+
+        const closedBlockEndLine = findCallableEndLine(doc, lineIndex, callableDef.kind);
+        // Avoid treating call expressions like "run Foo()" as declarations.
+        if (closedBlockEndLine === -1 && !callableDef.opensBlock && !callableDef.hasDeclarationPrefix) {
+            return null;
+        }
+
+        return {
+            startLine: lineIndex,
+            endLine: closedBlockEndLine === -1 ? lineIndex : closedBlockEndLine,
+            hasClosedBlock: closedBlockEndLine !== -1
+        };
+    }
+
+    function findRangeCandidate(requireSignatureMatch) {
+        let fallbackCandidate = null;
+        for (let i = 0; i < doc.lineCount; i++) {
+            const candidate = getRangeCandidate(i, requireSignatureMatch);
+            if (!candidate) {
+                continue;
+            }
+            if (candidate.hasClosedBlock) {
+                return candidate;
+            }
+            // Keep single-line declarations as a fallback, but prefer real blocks.
+            if (!fallbackCandidate) {
+                fallbackCandidate = candidate;
+            }
+        }
+
+        return fallbackCandidate;
+    }
+
+    let rangeCandidate = null;
     if (signatureCandidates.length > 0) {
-        for (let i = 0; i < doc.lineCount; i++) {
-            const lineText = doc.lineAt(i).text;
-            const methodDefMatch = lineText.match(/^\s*method\b[\w\s]*\b([\w_]+)\b\s*\(([^)]*)\)/i);
-            if (methodDefMatch) {
-                const defName = methodDefMatch[1];
-                const defSig = methodDefMatch[2] || '';
-                const matchedCandidate = signatureCandidates.some((candidate) => signatureMatches(defSig, candidate));
-                if (defName === methodName && matchedCandidate) {
-                    startLine = i;
-                    found = true;
-                    break;
-                }
-            }
-        }
+        rangeCandidate = findRangeCandidate(true);
     }
 
-    if (!found) {
-        const escapedMethodName = escapeRegExp(methodName);
-        const regex = new RegExp(`^\\s*method\\b[\\w\\s]*\\b${escapedMethodName}\\b`, 'i');
-        for (let i = 0; i < doc.lineCount; i++) {
-            const lineText = doc.lineAt(i).text;
-            if (regex.test(lineText)) {
-                startLine = i;
-                break;
-            }
-        }
+    if (!rangeCandidate) {
+        rangeCandidate = findRangeCandidate(false);
     }
 
-    let endLine = startLine;
-    const endMethodRegex = /^end\s+method\.$/i;
-    for (let i = startLine + 1; i < doc.lineCount; i++) {
-        const lineText = doc.lineAt(i).text.trim();
-        if (endMethodRegex.test(lineText)) {
-            endLine = i;
-            break;
-        }
+    if (!rangeCandidate) {
+        return [0, 0];
     }
 
-    return [startLine, endLine];
+    return [rangeCandidate.startLine, rangeCandidate.endLine];
 }
 
 function findPropertyRange(doc, propertyName) {
@@ -207,8 +296,8 @@ async function openTargetFileFromSourcePath(sourcePath, workspaceRoot, type) {
         return;
     }
 
-    const filePath = type === FILE_TYPES.XREF 
-                      ? resolveXrefFilePath(sourcePath, workspaceRoot) 
+    const filePath = type === FILE_TYPES.XREF
+                      ? resolveXrefFilePath(sourcePath, workspaceRoot)
                       : resolveProparseFilePath(sourcePath, workspaceRoot);
 
     if (!filePath) {

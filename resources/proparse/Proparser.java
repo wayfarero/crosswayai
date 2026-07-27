@@ -198,7 +198,7 @@ public class Proparser {
                 writer.println("  \"error\": " + jsonString(e.toString()));
                 writer.println("}");
             } catch (Exception ignored) {}
-            
+
             System.out.println("  [ERROR] " + outFile.getAbsolutePath());
             counts[1]++;
         }
