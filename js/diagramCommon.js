@@ -6,7 +6,7 @@ const { getCrossWayAILog, appendToLogFile } = require('./crosswayaiLogger');
 const diagramColors = require('../resources/diagram-colors.json');
 const { getExclusionsSettings, createExclusionMatcher } = require('./crosswayaiSettings');
 const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
-const { getRuntimeDLC, getWorkspaceRoot } = require('./workspaceProjects');
+const { getRuntimeDLC, getWorkspaceRoot, getSourceOutputRelativeDir } = require('./workspaceProjects');
 const { KNOWN_OE_VERSIONS } = require('./extensionConstants');
 
 
@@ -103,26 +103,22 @@ async function runABLScript({ context, workspaceRoot, oeversion, scriptName, arg
 
     CrossWayAILog.appendLine(`>Spawning ABL process: ${executable} ${args.join(' ')}`);
     CrossWayAILog.appendLine(`>Logging to: ${logFile}`);
-    CrossWayAILog.show(true);
     return new Promise((resolve, reject) => {
         const ablProcess = require('child_process').spawn(executable, args);
         ablProcess.stdout.pipe(logStream);
         ablProcess.stderr.pipe(logStream);
         ablProcess.on('error', (error) => {
             CrossWayAILog.appendLine(`spawn error: ${error}`);
-            CrossWayAILog.show(true);
             vscode.window.showErrorMessage(`ABL script execution failed. Make sure '${executable}' is in your system's PATH. Error: ${error.message}`);
             reject(error);
         });
         ablProcess.on('close', (code) => {
             if (code !== 0) {
                 CrossWayAILog.appendLine(`ABL process exited with code ${code}`);
-                CrossWayAILog.show(true);
                 vscode.window.showErrorMessage(`ABL script execution failed with code ${code}. See ${logFile} for details.`);
                 reject(new Error(`ABL process exited with code ${code}`));
             } else {
                 CrossWayAILog.appendLine(`>ABL process finished successfully.`);
-                CrossWayAILog.show(true);
                 vscode.window.showInformationMessage('CrossWayAI: ABL process finished successfully!');
                 resolve();
             }
@@ -163,8 +159,8 @@ function resolveSourceFileLookupContext(sourceFilePath, workspaceRoot, fileEntry
 
     const projectName = String(fileEntry.project || fileEntry.Project || '').trim();
     const sourceName = String(fileEntry.source || fileEntry.Source || '').trim();
-    const projectRoot = projectName ? path.join(workspaceRoot, projectName) : workspaceRoot;
-    const sourceRoot = sourceName ? path.join(projectRoot, sourceName) : projectRoot;
+    const projectRoot = path.resolve(workspaceRoot, projectName);
+    const sourceRoot = path.resolve(projectRoot, sourceName);
     const relativeSourcePath = path.relative(sourceRoot, sourceFilePath);
 
     if (!relativeSourcePath || relativeSourcePath.startsWith('..') || path.isAbsolute(relativeSourcePath)) {
@@ -222,15 +218,14 @@ function resolveProparseFilePath(sourceFilePath, workspaceRoot) {
         return null;
     }
 
-    const { projectName, sourceName, projectRoot, relativeSourcePath } = lookupContext;
+    const { projectRoot, sourceRoot, relativeSourcePath } = lookupContext;
     const parsed = path.parse(relativeSourcePath);
     const relativeAstPath = path.join(parsed.dir, `${parsed.name}.ast.json`);
     const candidate = path.join(
         workspaceRoot,
         '.crosswayai',
         '.proparse',
-        projectName || path.basename(projectRoot),
-        sourceName,
+        getSourceOutputRelativeDir(workspaceRoot, projectRoot, sourceRoot),
         relativeAstPath
     );
 
@@ -240,7 +235,7 @@ function resolveProparseFilePath(sourceFilePath, workspaceRoot) {
 /**
  * Computes the sub-directory (relative to `.crosswayai/mermaid`) under which a
  * diagram for the given source file should be persisted. The layout mirrors the
- * `.proparse` convention (`<project>/<source>/<relativeDir>`) so that generated
+ * `.proparse` convention (`<source-output-dir>/<relativeDir>`) so that generated
  * `.md` files retain their original project paths and files sharing a base name
  * across folders or projects no longer overwrite each other.
  *
@@ -259,21 +254,9 @@ function resolveMermaidRelativeDir(sourceFilePath, workspaceRoot, fileEntry = nu
         return '';
     }
 
-    const { projectName, sourceName, relativeSourcePath } = lookupContext;
-    const relativeDir = path.dirname(relativeSourcePath);
-
-    const segments = [];
-    if (projectName) {
-        segments.push(projectName);
-    }
-    if (sourceName) {
-        segments.push(sourceName);
-    }
-    if (relativeDir && relativeDir !== '.') {
-        segments.push(relativeDir);
-    }
-
-    return segments.length > 0 ? path.join(...segments) : '';
+    const { projectRoot, sourceRoot, relativeSourcePath } = lookupContext;
+    const sourceOutputDir = getSourceOutputRelativeDir(workspaceRoot, projectRoot, sourceRoot);
+    return path.join(sourceOutputDir, path.dirname(relativeSourcePath));
 }
 
 function buildNodeDatabaseDetails(dsMap) {
@@ -1028,7 +1011,6 @@ async function generateDiagram(context, uri, diagramType, graphBuilder) {
         config = getDiagramConfig(diagramType);
     } catch (error) {
         CrossWayAILog.appendLine(`**Error: ${error.message}`);
-        CrossWayAILog.show(true);
         vscode.window.showErrorMessage(error.message);
         return;
     }
@@ -1076,7 +1058,6 @@ async function generateDiagram(context, uri, diagramType, graphBuilder) {
         }
     } catch (error) {
         CrossWayAILog.appendLine(`**Error generating ${diagramType} diagram: ${error.message}`);
-        CrossWayAILog.show(true);
         vscode.window.showErrorMessage(config.errorMessage);
     }
 }

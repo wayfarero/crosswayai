@@ -10,6 +10,28 @@ function getDsMapPath(workspaceRoot) {
     return path.join(workspaceRoot, '.crosswayai', 'dsMap.json');
 }
 
+/**
+ * Keeps the first ttFile per normalized path. Overlapping source folders can
+ * collect the same file multiple times, and duplicates break READ-JSON in ABL.
+ * Comparison is case-insensitive because the ABL index is case-insensitive.
+ */
+function dedupeFilesByPath(files) {
+    const seenPaths = new Set();
+    const uniqueFiles = [];
+
+    for (const file of files || []) {
+        const key = normalizeFsPath(file.filePath || file.FilePath);
+        if (seenPaths.has(key)) {
+            continue;
+        }
+
+        seenPaths.add(key);
+        uniqueFiles.push(file);
+    }
+
+    return uniqueFiles;
+}
+
 function getDsMapJsonObject(workspaceRoot, suppressMissingFileMessage = false) {
     if (!workspaceRoot) {
         return null;
@@ -30,6 +52,7 @@ function getDsMapJsonObject(workspaceRoot, suppressMissingFileMessage = false) {
 
 module.exports = {
     normalizeFsPath,
+    dedupeFilesByPath,
     getDsMapPath,
     getDsMapJsonObject
 };

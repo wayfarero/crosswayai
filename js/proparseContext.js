@@ -274,7 +274,6 @@ async function ensureProparserCompiled(context) {
         return true;
     } catch (error) {
         CrossWayAILog.appendLine(`>Proparse: Failed to compile Proparser.java: ${error.message}`);
-        CrossWayAILog.show(true);
         vscode.window.showWarningMessage('CrossWayAI: Failed to compile Proparser.java. See CrossWayAILog for details.');
         return false;
     }

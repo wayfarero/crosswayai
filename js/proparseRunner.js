@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
 const { resolveWorkspaceRoot,
+        getSourceOutputRelativeDir,
         getOpenEdgeProjectConfig,
         resolveProjectSourceDirs,
         getProjectOEVersion,
@@ -21,7 +22,7 @@ const PROPARSE_DIR = 'proparse';  // subdirectory under resources/
  *   - Reads the source directories declared in buildPath (type: "source").
  *   - Runs Proparser in batch mode against each source directory.
  *   - Writes one .ast.json file per source file under:
- *       .crosswayai/.proparse/<projectName>/<relative-source-dir>/<filename>.ast.json
+ *       .crosswayai/.proparse/<source-output-dir>/<filename>.ast.json
  *
  * Supports single-project and multi-project workspaces.
  *
@@ -32,7 +33,6 @@ async function proparseAllProjects(context) {
     const CrossWayAILog = getCrossWayAILog();
 
     CrossWayAILog.appendLine('\n>Proparse All Projects: Starting...');
-    CrossWayAILog.show(true);
 
     // ── 1. Validate Java ───────────────────────────────────────────────────
     const javaExe = await resolveJavaPath();
@@ -137,9 +137,8 @@ async function proparseAllProjects(context) {
                 continue;
             }
 
-            // Mirror the source dir's relative path (from project root) in the output
-            const srcRelFromProject = path.relative(projectRoot, srcDir);
-            const outDir = path.join(proparseOutBase, projectName, srcRelFromProject);
+            const sourceOutputDir = getSourceOutputRelativeDir(workspaceRoot, projectRoot, srcDir);
+            const outDir = path.join(proparseOutBase, sourceOutputDir);
             fs.mkdirSync(outDir, { recursive: true });
 
             CrossWayAILog.appendLine(`>Proparse All Projects: Parsing "${srcDir}" → "${outDir}"...`);
@@ -179,7 +178,6 @@ async function proparseAllProjects(context) {
     const logFile = path.join(workspaceRoot, '.crosswayai', 'crosswayai.log');
     const summary = `>Proparse All Projects: Done. ${totalSuccess} file(s) parsed, ${totalError} error(s). Output: ${proparseOutBase}\n>For full details, check: ${logFile}`;
     CrossWayAILog.appendLine(`\n${summary}`);
-    CrossWayAILog.show(true);
 
     if (totalError === 0) {
         vscode.window.showInformationMessage(

@@ -11,12 +11,12 @@ const { refreshActiveMermaidDiagram } = require('./mermaidRefreshState');
 
 const XREF_WATCHER_DELAY_MS = 2000;
 
-function setupXrefWatcher(context) {
-    const workspaceRoot = getWorkspaceRoot();
+function setupXrefWatcher(context, workspaceRoot = getWorkspaceRoot()) {
     if (!workspaceRoot) return;
 
-    const watcherPattern = new vscode.RelativePattern(workspaceRoot, '**/.builder/**/*.xref');
-    const watcher = vscode.workspace.createFileSystemWatcher(watcherPattern, false, false, false);
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    if (workspaceFolders.length === 0) return;
+
     const pendingXrefs = createPendingXrefBatch();
     const CrossWayAILog = getCrossWayAILog();
     const scheduleXrefProcessing = createXrefProcessingScheduler({
@@ -25,25 +25,46 @@ function setupXrefWatcher(context) {
         pendingXrefs
     });
 
-    CrossWayAILog.appendLine(`XREF watcher active.`);
+    const watcherDisposables = [];
+    const watcherGroup = {
+        dispose() {
+            if (pendingXrefs.disposed) return;
+            pendingXrefs.disposed = true;
+            clearTimeout(pendingXrefs.debounceTimer);
+            pendingXrefs.debounceTimer = null;
+            pendingXrefs.changed.clear();
+            pendingXrefs.deleted.clear();
+            watcherDisposables.forEach(disposable => disposable.dispose());
+        }
+    };
 
-    const watcherDisposables = registerXrefWatcherHandlers({
-        watcher,
-        pendingXrefs,
-        scheduleXrefProcessing,
-        CrossWayAILog
-    });
+    try {
+        for (const folder of workspaceFolders) {
+            const watcherPattern = new vscode.RelativePattern(folder.uri.fsPath, '**/.builder/**/*.xref');
+            const watcher = vscode.workspace.createFileSystemWatcher(watcherPattern, false, false, false);
+            watcherDisposables.push(watcher);
+            watcherDisposables.push(...registerXrefWatcherHandlers({
+                watcher,
+                pendingXrefs,
+                scheduleXrefProcessing,
+                CrossWayAILog
+            }));
+        }
+    } catch (error) {
+        watcherGroup.dispose();
+        throw error;
+    }
 
-    context.subscriptions.push(watcher);
-    context.subscriptions.push(...watcherDisposables);
-    context.subscriptions.push(createPendingXrefCleanup(pendingXrefs));
+    CrossWayAILog.appendLine(`XREF watching active for workspace folders: ${workspaceFolders.map(folder => folder.uri.fsPath).join(', ')}. Output root: ${workspaceRoot}.`);
+    return watcherGroup;
 }
 
 function createPendingXrefBatch() {
     return {
         changed: new Set(),
         deleted: new Set(),
-        debounceTimer: null
+        debounceTimer: null,
+        disposed: false
     };
 }
 
@@ -58,24 +79,42 @@ function takeCurrentXrefBatches(pendingXrefs) {
 
 function createXrefProcessingScheduler({ context, workspaceRoot, pendingXrefs }) {
     return function scheduleXrefProcessing() {
+        if (pendingXrefs.disposed) return;
         if (pendingXrefs.debounceTimer) {
             clearTimeout(pendingXrefs.debounceTimer);
         }
 
         pendingXrefs.debounceTimer = setTimeout(async () => {
+            if (pendingXrefs.disposed) return;
             if (getAnalysisRunning()) {
                 scheduleXrefProcessing();
                 return;
             }
 
             const { changedBatch, deletedBatch } = takeCurrentXrefBatches(pendingXrefs);
-            await processChangedXrefs(context, workspaceRoot, changedBatch, deletedBatch);
+            // Reserve analysis before the asynchronous source scan so a replacement
+            // watcher cannot start another batch while this one is preparing it.
+            setAnalysisRunning(true);
+            try {
+                await processChangedXrefs({
+                    context,
+                    workspaceRoot,
+                    changedXrefs: changedBatch,
+                    deletedXrefs: deletedBatch,
+                    pendingXrefs
+                });
+            } catch (error) {
+                getCrossWayAILog().appendLine(`Incremental update error: ${error.message}`);
+            } finally {
+                setAnalysisRunning(false);
+            }
         }, XREF_WATCHER_DELAY_MS);
     };
 }
 
 function registerXrefWatcherHandlers({ watcher, pendingXrefs, scheduleXrefProcessing, CrossWayAILog }) {
     const handleXrefChange = (uri, changeType = 'change') => {
+        if (pendingXrefs.disposed) return;
         const xrefPath = uri.fsPath;
         const isNewPendingXref = updatePendingXrefs(pendingXrefs, changeType, xrefPath);
 
@@ -122,18 +161,7 @@ function logPendingXrefEvent(CrossWayAILog, changeType, xrefPath) {
     CrossWayAILog.appendLine(`XREF updated: ${xrefPath}`);
 }
 
-function createPendingXrefCleanup(pendingXrefs) {
-    return {
-        dispose: () => {
-            if (pendingXrefs.debounceTimer) {
-                clearTimeout(pendingXrefs.debounceTimer);
-                pendingXrefs.debounceTimer = null;
-            }
-        }
-    };
-}
-
-async function processChangedXrefs(context, workspaceRoot, changedXrefs, deletedXrefs) {
+async function processChangedXrefs({ context, workspaceRoot, changedXrefs, deletedXrefs, pendingXrefs }) {
     const CrossWayAILog = getCrossWayAILog();
     const dsMapPath = getDsMapPath(workspaceRoot);
 
@@ -166,9 +194,10 @@ async function processChangedXrefs(context, workspaceRoot, changedXrefs, deleted
         dsMapJson,
         workspaceRoot,
         dsMapPath,
-        CrossWayAILog
+        CrossWayAILog,
+        pendingXrefs
     });
-    if (!syncResult.ok) {
+    if (!syncResult.ok || pendingXrefs.disposed) {
         return;
     }
 
@@ -181,10 +210,8 @@ async function processChangedXrefs(context, workspaceRoot, changedXrefs, deleted
     if (deletedFilesForAnalysis.length > 0) {
         CrossWayAILog.appendLine(`Deleted: ${deletedFilesForAnalysis.join(', ')}`);
     }
-    CrossWayAILog.show(true);
 
     try {
-        setAnalysisRunning(true);
         const extraArgs = ['-param', JSON.stringify({
             workspaceRoot,
             changedFiles: changedFilePaths.join(','),
@@ -196,13 +223,11 @@ async function processChangedXrefs(context, workspaceRoot, changedXrefs, deleted
         await cleanupDirectory(tempDir);
 
         CrossWayAILog.appendLine('Incremental analysis complete.\n');
-        await refreshActiveMermaidDiagram(context);
-        CrossWayAILog.show(true);
+        if (!pendingXrefs.disposed) {
+            await refreshActiveMermaidDiagram(context);
+        }
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental analysis error: ${error.message}`);
-        CrossWayAILog.show(true);
-    } finally {
-        setAnalysisRunning(false);
     }
 }
 
@@ -217,13 +242,17 @@ function mapXrefsToSourceFiles(xrefPaths, dsMapJson, options = {}) {
     return [...filePaths];
 }
 
-async function syncDsMapBeforeIncrementalAnalysis({ dsMapJson, workspaceRoot, dsMapPath, CrossWayAILog }) {
+async function syncDsMapBeforeIncrementalAnalysis({ dsMapJson, workspaceRoot, dsMapPath, CrossWayAILog, pendingXrefs }) {
     let syncResult;
     try {
         syncResult = await syncDsMapFilesWithWorkspace(dsMapJson, workspaceRoot);
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental update: workspace ttFile sync failed (${error.message}). Proceeding with existing dsMap.json.`);
         return { ok: true, removedFiles: [] };
+    }
+
+    if (pendingXrefs.disposed) {
+        return { ok: false, removedFiles: [] };
     }
 
     logWorkspaceSyncResult(syncResult, CrossWayAILog);

@@ -112,17 +112,14 @@ async function dumpAllDBDefinitions(context) {
 
     if (projectRoots.length === 0) {
         CrossWayAILog.appendLine('>CrossWayAI: openedge-project.json not found in any workspace folder.');
-        CrossWayAILog.show(true);
         vscode.window.showErrorMessage('CrossWayAI: openedge-project.json not found in any workspace folder.');
         return;
     }
 
     CrossWayAILog.appendLine('\nStarting dumpAllDBDefinitions...');
-    CrossWayAILog.show(true);
 
     for (const { root: projectRoot, projectPath } of projectRoots) {
         CrossWayAILog.appendLine(`>Processing project: ${projectRoot}`);
-        CrossWayAILog.show(true);
         
         let dbConnections;
         try {
@@ -130,14 +127,12 @@ async function dumpAllDBDefinitions(context) {
             dbConnections = projectCfg.dbConnections || [];
         } catch (e) {
             CrossWayAILog.appendLine(`>CrossWayAI: Failed to parse openedge-project.json in ${projectRoot}.`);
-            CrossWayAILog.show(true);
             vscode.window.showErrorMessage(`CrossWayAI: Failed to parse openedge-project.json in ${projectRoot}.`);
             continue;
         }
 
         if (!Array.isArray(dbConnections) || dbConnections.length === 0) {
             CrossWayAILog.appendLine(`>CrossWayAI: No database connections defined in ${projectRoot}.`);
-            CrossWayAILog.show(true);
             continue;
         }
 
@@ -156,7 +151,6 @@ async function dumpAllDBDefinitions(context) {
             const dbName = dbConn.name;
             if (dbName) {
                 CrossWayAILog.appendLine(`>Calling dumpDfFile for DB: ${dbName}`);
-                CrossWayAILog.show(true);
                 await dumpDfFile(context, dbName, workspaceRoot, path.basename(projectRoot), pfFilePath);
             }
         }
@@ -167,7 +161,6 @@ async function dumpAllDBDefinitions(context) {
     }
     
     CrossWayAILog.appendLine('Completed dumpAllDBDefinitions.\n');
-    CrossWayAILog.show(true);
 }
 
 

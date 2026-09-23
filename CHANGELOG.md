@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.0
+  - Improvements:
+    - pruned unlinked `.p` and `.i` file nodes from `dsMap.json` to reduce generated map size
+    - added quick navigation buttons (⌃/⌄) next to search count in `CrossWayAI Viewer` for iterating through search results
+    - normalized `ttFileNode.FileRelPath` values to use forward slashes in generated `dsMap.json` while preserving compatibility with existing backslash paths and  OS-native file lookups
+
+  - Bug Fixes:
+    - fixed duplicate source-path collection so the same file is only loaded once, and added the `crosswayai.workspaceRoot` override for explicitly pinning the workspace root while preserving automatic `.code-workspace` detection when unset.
+    - corrected double-click tooltip navigation to internal procedures so the whole procedure body is selected when it is closed with `END.` instead of `END PROCEDURE.`; previously only the declaration line of the last internal procedure in a file was selected
+    - corrected XREF-to-source mapping so outgoing references appear in Impact, Include and Call diagrams after a procedure is moved to its source directory root, without matching same-named files in other folders
+    - corrected the missing XREF files warning to show the absolute path of `crosswayai.log` instead of the relative `.crosswayai/crosswayai.log` path, so the log file can be opened directly from the CrossWayAILog output channel
+    - corrected invoke tooltip double-click navigation for multiline method and constructor declarations, addressing Unix target selection; preserved name-only lookup and explicit no-parameter overload selection
+    - corrected XREF parsing for files that use work tables (`DEFINE WORKFILE` / `DEFINE WORK-TABLE`), which failed with `Entry 2 is outside the range of list <name>. (560)` and left those files without any dependency links
+    - corrected XREF lookup for projects with more than two source directories by using the `openedge-project.json` source entries instead of fixed `.pct0` / `.pct1` paths
+    - Stopped `CrossWayAILog` from opening automatically and stealing focus; logs remain available in the Output panel.
+    - Added an error notification when a Mermaid diagram cannot be saved.
+
 ## 1.9.2
   - Bug Fixes:
     - corrected double-click tooltip navigation on Windows to open the right overloaded method/constructor and highlight the full target method, constructor, property, or procedure range

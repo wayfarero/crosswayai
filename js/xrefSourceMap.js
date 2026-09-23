@@ -16,31 +16,53 @@ function parseXrefPath(xrefPath) {
     };
 }
 
-function resolveFallbackSourcePath(projectRoot, pctIndex, relPath, requireExistingFile = true) {
-    const normalizedProjectRoot = path.resolve(projectRoot).toLowerCase() + path.sep;
+/**
+ * Builds the source files an xref can belong to, most specific first.
+ * The xref path is only relative to a source directory, so a plain suffix match
+ * would also accept a same-named file in another folder. Anchoring every
+ * candidate on a configured source directory keeps the mapping unambiguous.
+ */
+function buildSourceCandidates(projectRoot, pctIndex, relPath) {
     const sourceDirs = resolveProjectSourceDirs(projectRoot);
+    const orderedSourceRoots = [];
 
+    // The .pctN suffix identifies the source directory that produced the xref.
     if (Number.isInteger(pctIndex) && pctIndex >= 0 && pctIndex < sourceDirs.length) {
-        const mappedCandidate = path.resolve(sourceDirs[pctIndex], relPath);
-        const normalizedMappedCandidate = mappedCandidate.toLowerCase();
-        if (normalizedMappedCandidate.startsWith(normalizedProjectRoot) && (!requireExistingFile || fs.existsSync(mappedCandidate))) {
-            return {
-                filePath: mappedCandidate,
-                sourceRoot: sourceDirs[pctIndex]
-            };
+        orderedSourceRoots.push(sourceDirs[pctIndex]);
+    }
+    orderedSourceRoots.push(...sourceDirs, projectRoot);
+
+    const normalizedProjectRoot = normalizeFsPath(path.resolve(projectRoot)) + path.sep;
+    const candidates = [];
+    const seenPaths = new Set();
+
+    for (const sourceRoot of orderedSourceRoots) {
+        const filePath = path.resolve(sourceRoot, relPath);
+        const normalizedFilePath = normalizeFsPath(filePath);
+
+        if (seenPaths.has(normalizedFilePath) || !normalizedFilePath.startsWith(normalizedProjectRoot)) {
+            continue;
+        }
+
+        seenPaths.add(normalizedFilePath);
+        candidates.push({ filePath, sourceRoot });
+    }
+
+    return candidates;
+}
+
+function buildDsMapFilesByPath(dsMap) {
+    const ttFile = (dsMap && dsMap.dsMap && dsMap.dsMap.ttFile) || [];
+    const filesByPath = new Map();
+
+    for (const file of ttFile) {
+        const filePath = String(file.filePath || '');
+        if (filePath) {
+            filesByPath.set(normalizeFsPath(path.resolve(filePath)), file);
         }
     }
 
-    const directCandidate = path.resolve(projectRoot, relPath);
-    const normalizedDirectCandidate = directCandidate.toLowerCase();
-    if (normalizedDirectCandidate.startsWith(normalizedProjectRoot) && (!requireExistingFile || fs.existsSync(directCandidate))) {
-        return {
-            filePath: directCandidate,
-            sourceRoot: projectRoot
-        };
-    }
-
-    return null;
+    return filesByPath;
 }
 
 function mapXrefToSourceInfo(xrefPath, dsMap, { allowMissingSourceFile = false } = {}) {
@@ -50,27 +72,22 @@ function mapXrefToSourceInfo(xrefPath, dsMap, { allowMissingSourceFile = false }
     }
 
     const { projectRoot, pctIndex, relPath } = parsedXref;
-    const ttFile = (dsMap && dsMap.dsMap && dsMap.dsMap.ttFile) || [];
+    const candidates = buildSourceCandidates(projectRoot, pctIndex, relPath);
+    const dsMapFilesByPath = buildDsMapFilesByPath(dsMap);
 
-    const normalizedProjectRoot = path.resolve(projectRoot).toLowerCase();
-    const normalizedSuffix = (path.sep + relPath).toLowerCase();
-
-    for (const file of ttFile) {
-        const normalizedFilePath = normalizeFsPath(path.resolve(String(file.filePath || '')));
-        if (!normalizedFilePath.startsWith(normalizedProjectRoot + path.sep)) {
-            continue;
-        }
-        if (normalizedFilePath.endsWith(normalizedSuffix)) {
+    for (const candidate of candidates) {
+        const knownFile = dsMapFilesByPath.get(normalizeFsPath(candidate.filePath));
+        if (knownFile) {
             return {
-                filePath: file.filePath,
+                filePath: knownFile.filePath,
                 projectRoot,
-                sourceRoot: null,
+                sourceRoot: candidate.sourceRoot,
                 isNewDsMapEntry: false
             };
         }
     }
 
-    const fallback = resolveFallbackSourcePath(projectRoot, pctIndex, relPath, !allowMissingSourceFile);
+    const fallback = candidates.find(candidate => allowMissingSourceFile || fs.existsSync(candidate.filePath));
     if (!fallback) {
         return null;
     }
@@ -85,6 +102,5 @@ function mapXrefToSourceInfo(xrefPath, dsMap, { allowMissingSourceFile = false }
 
 module.exports = {
     parseXrefPath,
-    resolveFallbackSourcePath,
     mapXrefToSourceInfo
 };

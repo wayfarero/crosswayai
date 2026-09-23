@@ -66,11 +66,10 @@ function createMermaidViewer() {
             const fenced = '```mermaid\n' + mermaidGraph.trim() + '\n```\n';
             fs.writeFileSync(outPath, fenced, 'utf8');
             CrossWayAILog.appendLine(`Saved Mermaid ${diagramType} diagram to ${outPath}`);
-            CrossWayAILog.show(true);
             return outPath;
         } catch (error) {
             CrossWayAILog.appendLine(`Failed to persist Mermaid ${diagramType} diagram: ${error.message}`);
-            CrossWayAILog.show(true);
+            vscode.window.showErrorMessage(`CrossWayAI: Could not save the ${diagramType} Mermaid diagram. See CrossWayAILog for details.`);
             return null;
         }
     }
@@ -221,7 +220,6 @@ function createMermaidViewer() {
                 return `${externalBase.toString()}?${query}`;
             } catch (error) {
                 CrossWayAILog.appendLine(`Mermaid viewer asExternalUri failed: ${error.message}`);
-                CrossWayAILog.show(true);
             }
         }
         return `${internalBase.toString()}?${query}`;
@@ -233,7 +231,6 @@ function createMermaidViewer() {
             await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
         } catch (error) {
             CrossWayAILog.appendLine(`Unable to lock viewer editor group: ${error.message}`);
-            CrossWayAILog.show(true);
         }
     }
 
@@ -269,10 +266,8 @@ function createMermaidViewer() {
                 const refreshUrl = await resolveExternalViewerUrl(mermaidServerPort, activeMarkdownRelativePath);
                 await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url: refreshUrl });
                 CrossWayAILog.appendLine(`Mermaid viewer refreshed: ${activeMarkdownRelativePath} \n`);
-                CrossWayAILog.show(true);
             } catch (error) {
                 CrossWayAILog.appendLine(`Failed to refresh Mermaid viewer: ${error.message}`);
-                CrossWayAILog.show(true);
             } finally {
                 refreshInProgress = false;
             }
@@ -309,7 +304,6 @@ function createMermaidViewer() {
         });
 
         CrossWayAILog.appendLine(`Watching Mermaid markdown: ${normalizedRelPath}`);
-        CrossWayAILog.show(true);
     }
 
     function extractFsPath(candidate) {
@@ -381,7 +375,6 @@ function createMermaidViewer() {
             }),
             (error) => {
                 CrossWayAILog.appendLine(`Failed to open ${failurePrefix}: ${filePath} - ${error.message}`);
-                CrossWayAILog.show(true);
                 vscode.window.showErrorMessage(`CrossWayAI: Could not open ${failurePrefix}: ${path.basename(filePath)}`);
             }
         );
@@ -420,7 +413,6 @@ function createMermaidViewer() {
     function openFileAtTarget(message) {
         const fileUri = vscode.Uri.file(message.filePath);
         CrossWayAILog.appendLine(`Opening file: ${message.filePath} -> ${message.targetType} ${message.targetName} with signature ${message.signature}`);
-        CrossWayAILog.show(true);
 
         vscode.workspace.openTextDocument(fileUri).then((document) => {
             const targetRange = getTargetRange(document, message);
@@ -433,12 +425,10 @@ function createMermaidViewer() {
                 revealTargetInOpenEditors(document, targetRange);
             }, (error) => {
                 CrossWayAILog.appendLine(`Failed to reveal target in file: ${message.filePath} - ${error.message}`);
-                CrossWayAILog.show(true);
                 vscode.window.showErrorMessage(`CrossWayAI: Could not reveal target in file: ${path.basename(message.filePath)}`);
             });
         }, (error) => {
             CrossWayAILog.appendLine(`Failed to open file: ${message.filePath} - ${error.message}`);
-            CrossWayAILog.show(true);
             vscode.window.showErrorMessage(`CrossWayAI: Could not open file: ${path.basename(message.filePath)}`);
         });
     }
@@ -474,11 +464,9 @@ function createMermaidViewer() {
 
     function handleNodeSummaryMessage(message) {
         CrossWayAILog.appendLine(`Node summary requested for node ${message.nodeId || 'unknown'} (${message.filePath || 'no file path'})`);
-        CrossWayAILog.show(true);
 
         sendNodeSummaryResult(message).catch((error) => {
             CrossWayAILog.appendLine(`[NodeSummary] unexpected failure: ${error.message}`);
-            CrossWayAILog.show(true);
             postNodeSummaryResult({
                 type: 'nodeSummaryResult',
                 nodeId: message.nodeId || null,
@@ -487,7 +475,6 @@ function createMermaidViewer() {
                 reason: 'AI_GENERATION_FAILED'
             }).then(undefined, (postError) => {
                 CrossWayAILog.appendLine(`[NodeSummary] failed to post failure response: ${postError.message}`);
-                CrossWayAILog.show(true);
             });
         });
     }
@@ -713,7 +700,6 @@ function createMermaidViewer() {
                 const addressInfo = mermaidServer.address();
                 mermaidServerPort = addressInfo && addressInfo.port ? addressInfo.port : null;
                 CrossWayAILog.appendLine(`Mermaid viewer server running at http://127.0.0.1:${mermaidServerPort}`);
-                CrossWayAILog.show(true);
                 resolve();
             });
         });
@@ -791,7 +777,6 @@ function createMermaidViewer() {
             }
         } catch (error) {
             CrossWayAILog.appendLine(`Failed to open Mermaid viewer: ${error.message}`);
-            CrossWayAILog.show(true);
             vscode.window.showErrorMessage('CrossWayAI: Failed to open Mermaid viewer. See CrossWayAILog for details.');
         }
     }
@@ -921,7 +906,6 @@ function cleanupLegacyMermaidDiagrams(workspaceRoot) {
 
     if (removedCount > 0 && CrossWayAILog) {
         CrossWayAILog.appendLine(`Old version Mermaid diagram cleanup removed ${removedCount} flat file(s) from ${mermaidRoot}.`);
-        CrossWayAILog.show(true);
     }
 }
 

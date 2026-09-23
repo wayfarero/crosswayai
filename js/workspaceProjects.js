@@ -1,8 +1,9 @@
 const path = require('path');
 const fs = require('fs');
+const { createHash } = require('crypto');
 const vscode = require('vscode');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
-const { normalizeFsPath } = require('./dsMapStore');
+const { normalizeFsPath, dedupeFilesByPath } = require('./dsMapStore');
 
 function normalizeConfigValue(value) {
     if (value === undefined || value === null) {
@@ -17,17 +18,186 @@ function getProjectNameForFolder(folder) {
     return folder.name || path.basename(folder.uri.fsPath);
 }
 
+function getOutputRelativeDir(baseDir, targetDir) {
+    const relativeDir = path.relative(baseDir, targetDir);
+    if (relativeDir !== '..' && !relativeDir.startsWith('..' + path.sep) && !path.isAbsolute(relativeDir)) {
+        return relativeDir;
+    }
+
+    // External directories need a stable identity without parent traversal or
+    // collisions between projects that share a folder name.
+    const absoluteDir = path.resolve(targetDir);
+    const identity = process.platform === 'win32' ? absoluteDir.toLowerCase() : absoluteDir;
+    const hash = createHash('sha256').update(identity).digest('hex').slice(0, 12);
+    const name = path.basename(absoluteDir).replace(/[^a-zA-Z0-9_.-]/g, '_') || 'root';
+    return path.join('_external', `${name}-${hash}`);
+}
+
+function getSourceOutputRelativeDir(workspaceRoot, projectRoot, sourceRoot) {
+    const projectDir = getOutputRelativeDir(workspaceRoot, projectRoot) || path.basename(projectRoot) || 'workspace';
+    const sourceDir = getOutputRelativeDir(projectRoot, sourceRoot);
+    return path.join(projectDir, sourceDir);
+}
+
+let lastWorkspaceRootLogMessage = null;
+
 /**
- * Resolves the workspace root directory from the available workspace folders.
+ * The workspace root is resolved on nearly every command, so the same message would
+ * otherwise be repeated on each call. Logs only when the outcome changes.
+ */
+function logWorkspaceRootOnce(message) {
+    if (message === lastWorkspaceRootLogMessage) {
+        return;
+    }
+
+    lastWorkspaceRootLogMessage = message;
+
+    const CrossWayAILog = getCrossWayAILog();
+    if (CrossWayAILog) {
+        CrossWayAILog.appendLine(message);
+    }
+}
+
+/**
+ * Reads the crosswayai.workspaceRoot setting. Returns null when unset or invalid,
+ * allowing automatic detection to take over. Prevents bad values from breaking
+ * resolveWorkspaceRoot by validating absolute paths and guarding filesystem checks.
+ */
+function getConfiguredWorkspaceRoot() {
+    let configuredRoot = null;
+
+    try {
+        configuredRoot = normalizeConfigValue(vscode.workspace.getConfiguration('crosswayai').get('workspaceRoot'));
+    } catch (error) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: failed to read crosswayai.workspaceRoot: ${error.message}`);
+        return null;
+    }
+
+    if (!configuredRoot) {
+        return null;
+    }
+
+    if (!path.isAbsolute(configuredRoot)) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: ignoring crosswayai.workspaceRoot '${configuredRoot}', an absolute path is required.`);
+        return null;
+    }
+
+    // statSync still throws on a permission error, or when the folder disappears
+    // right after the check. resolveWorkspaceRoot runs for every command, so a bad
+    // value has to degrade to automatic detection instead of breaking the command.
+    let isExistingDirectory = false;
+    try {
+        isExistingDirectory = fs.existsSync(configuredRoot) && fs.statSync(configuredRoot).isDirectory();
+    } catch (error) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: ignoring crosswayai.workspaceRoot '${configuredRoot}': ${error.message}`);
+        return null;
+    }
+
+    if (!isExistingDirectory) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: ignoring crosswayai.workspaceRoot '${configuredRoot}', it is not an existing folder.`);
+        return null;
+    }
+
+    return path.normalize(configuredRoot);
+}
+
+/**
+ * Returns the directory of the .code-workspace file currently open.
+ * Avoids filesystem scanning, which can match workspace files from unrelated folders.
+ * Returns null when VS Code is opened on a plain folder.
+ */
+function getOpenWorkspaceFileDir() {
+    const workspaceFile = vscode.workspace.workspaceFile;
+    if (!workspaceFile || workspaceFile.scheme !== 'file') {
+        return null;
+    }
+
+    return path.dirname(workspaceFile.fsPath);
+}
+
+function isSameOrAncestorDir(candidateDir, targetDir) {
+    const relative = path.relative(candidateDir, targetDir);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * Returns the deepest directory shared by all workspace folders.
+ * Returns null when folders span multiple drives or share only the drive root,
+ * since a drive root is not a usable workspace root. Used when the open
+ * .code-workspace file sits inside one project and cannot serve as root for others.
+ */
+function getCommonAncestorDir(workspaceFolders) {
+    const folderPaths = workspaceFolders.map(folder => path.resolve(folder.uri.fsPath));
+    const driveRoot = path.parse(folderPaths[0]).root;
+
+    if (folderPaths.some(folderPath => path.parse(folderPath).root.toLowerCase() !== driveRoot.toLowerCase())) {
+        return null;
+    }
+
+    const segmentLists = folderPaths.map(folderPath => folderPath.slice(driveRoot.length).split(path.sep).filter(Boolean));
+    const sharedSegments = [];
+
+    for (let index = 0; index < segmentLists[0].length; index++) {
+        const segment = segmentLists[0][index];
+        const sharedByAll = segmentLists.every(segments => {
+            const otherSegment = segments[index];
+            return otherSegment === segment || (process.platform === 'win32'
+                && otherSegment !== undefined && otherSegment.toLowerCase() === segment.toLowerCase());
+        });
+
+        if (!sharedByAll) {
+            break;
+        }
+
+        sharedSegments.push(segment);
+    }
+
+    if (sharedSegments.length === 0) {
+        return null;
+    }
+
+    return path.join(driveRoot, ...sharedSegments);
+}
+
+/**
+ * Resolves the workspace root directory, in order:
+ * The crosswayai.workspaceRoot setting when it points at an existing folder.
+ * The folder holding the open .code-workspace file, when it contains every workspace folder.
+ * The deepest common folder of all workspace folders, for multi-root workspaces whose
+ * .code-workspace file lives inside one of the projects.
+ * Otherwise the original behaviour:
  * If there is only one folder, uses its path directly.
  * If the first folder is a parent of other folders, uses path.dirname of a subfolder.
  * Otherwise, uses path.dirname of the first folder.
  */
 function resolveWorkspaceRoot(workspaceFolders) {
     const CrossWayAILog = getCrossWayAILog();
+
+    const configuredRoot = getConfiguredWorkspaceRoot();
+    if (configuredRoot) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: using configured workspace root ${configuredRoot}`);
+        return configuredRoot;
+    }
+
     if (!workspaceFolders || workspaceFolders.length === 0) {
         if (CrossWayAILog) CrossWayAILog.appendLine('resolveWorkspaceRoot: No workspace folders found.');
         return '';
+    }
+
+    const workspaceFileDir = getOpenWorkspaceFileDir();
+    if (workspaceFileDir && workspaceFolders.every(folder => isSameOrAncestorDir(workspaceFileDir, folder.uri.fsPath))) {
+        logWorkspaceRootOnce(`resolveWorkspaceRoot: using the folder of the open workspace file ${workspaceFileDir}`);
+        return workspaceFileDir;
+    }
+
+    // The open .code-workspace file sits inside one of the projects, so its folder cannot
+    // hold the others. The folder shared by all of them is the root the user sees.
+    if (workspaceFolders.length > 1) {
+        const commonAncestorDir = getCommonAncestorDir(workspaceFolders);
+        if (commonAncestorDir) {
+            logWorkspaceRootOnce(`resolveWorkspaceRoot: using the common folder of the workspace folders ${commonAncestorDir}`);
+            return commonAncestorDir;
+        }
     }
 
     // Look for .code-workspace file recursively upward from each workspace folder
@@ -261,7 +431,6 @@ function loadOpenEdgeProjectConfig(folder) {
 
     if (fs.existsSync(openedgeProjectJsonPath)) {
         CrossWayAILog.appendLine(`>OpenEdge project config found for project : ${projectName}`);
-        CrossWayAILog.show(true);        
         cfg = getOpenEdgeProjectConfig(projectRoot);
         if (!cfg) {
             vscode.window.showErrorMessage('Failed to load openedge-project.json due to parse error.');
@@ -314,7 +483,15 @@ async function findSourceFiles(projectRoot, sourceDirs = [], projectName) {
         }
     }
 
-    return { dsMap: { ttFile } };
+    // Source directories that overlap inside the same project collect a file more than once
+    const uniqueFiles = dedupeFilesByPath(ttFile);
+    const duplicateCount = ttFile.length - uniqueFiles.length;
+
+    if (duplicateCount > 0) {
+        CrossWayAILog.appendLine(`>Skipped ${duplicateCount} duplicate file(s) in ${projectName}: its source directories overlap.`);
+    }
+
+    return { dsMap: { ttFile: uniqueFiles } };
 }
 
 async function collectWorkspaceSourceScan(workspaceFolders, workspaceRoot) {
@@ -348,7 +525,10 @@ async function collectWorkspaceSourceScan(workspaceFolders, workspaceRoot) {
 
 async function collectWorkspaceSourceFiles(workspaceFolders, workspaceRoot) {
     const scan = await collectWorkspaceSourceScan(workspaceFolders, workspaceRoot);
-    return scan.files;
+
+    // findSourceFiles only sees one project, so projects declaring the same source
+    // directory still contribute the same file once each to the combined scan.
+    return dedupeFilesByPath(scan.files);
 }
 
 /**
@@ -412,6 +592,7 @@ async function syncDsMapFilesWithWorkspace(dsMapJson, workspaceRoot) {
 module.exports = {
     normalizeConfigValue,
     getProjectNameForFolder,
+    getSourceOutputRelativeDir,
     getWorkspaceRoot,
     resolveProjectRootFromName,
     getOpenEdgeProjectConfig,

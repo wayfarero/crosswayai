@@ -27,7 +27,7 @@ A VS Code extension that visualizes code dependencies for Progress OpenEdge ABL 
 - [Progress OpenEdge](https://www.progress.com/openedge) 11.7 - 12.8 installation.
 - [OpenEdge ABL](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp) VS Code extension (installed automatically with CrossWayAI)
 - Java [JDK](https://www.oracle.com/java/technologies/downloads/) installation (needed by Proparse to run)
-- Workspace configuration file (`.code-workspace`) present in the workspace root folder, next to the workspace project folders
+- Workspace configuration file (`.code-workspace`) present in the workspace root, next to the project folders. This is the recommended layout, although storing the file in a subfolder is also supported (see [Workspace Root](#workspace-root))
 
 ## AI Configuration
 
@@ -49,7 +49,8 @@ To use Proparse support, you need to have a correctly installed and configured J
 
 > **Important:** CrossWayAI requires your ABL sources to be compiled. It reads `.xref`
 > files produced by the OpenEdge ABL extension's background builder — without them, no
-> dependency data will be available.
+> dependency data will be available. Note that at least one source directory needs to be specified
+> in the openedge-project.json configuration file.
 >
 > **Complete the [OpenEdge ABL extension setup](https://marketplace.visualstudio.com/items?itemName=riversidesoftware.openedge-abl-lsp)
 > first** and make sure your project compiles successfully before running CrossWayAI.
@@ -76,6 +77,49 @@ same xref are collapsed before incremental analysis updates the dependency data.
     - This will output corresponding proparse files of all workspace ABL files under the `.crosswayai\proparse` directory in your workspace root.
 
 Once the analysis is complete, you can use the other commands to generate specific diagrams or to view the corresponding XREF or Proparse content of an ABL file.
+
+## Workspace Root
+
+CrossWayAI stores its `.crosswayai` folder (dependency map, log and generated diagrams) in the workspace root.
+By default, the root is the folder containing the open `.code-workspace` file. If that file is located inside one
+of your projects, CrossWayAI uses the deepest folder shared by all workspace folders instead, so the `.crosswayai`
+folder remains inside the workspace you see in the Explorer.
+
+If your workspace folders have no common parent (for example, folders on different drives), the root falls back to
+the parent folder of the first workspace folder. In such cases, or whenever you want full control, you can override
+the root using `crosswayai.workspaceRoot` in the `settings` block of your `.code-workspace` file:
+
+```json
+{
+    "folders": [ ... ],
+    "settings": {
+        "crosswayai.workspaceRoot": "c:/projects/my-workspace"
+    }
+}
+```
+The value must be an absolute path to an existing folder (for example
+`c:/projects/my-workspace` on Windows or `/home/me/projects/my-workspace` on Linux/macOS).
+Relative paths or non-existent folders are ignored and reported in `CrossWayAILog`, and
+automatic detection is used instead. The same key can also be set in user or folder settings.
+
+XREF watching restarts automatically whenever VS Code configuration changes (including unrelated
+settings) or workspace folders are added or removed. The watcher resolves the workspace root again
+and discards queued updates from its previous instance. Analysis already running finishes at its
+original root without refreshing the diagram from that obsolete watcher. When you change the root,
+existing generated files stay in their original location; run **CrossWayAI: Generate Dependency Map**
+if the new root does not have a dependency map yet.
+
+XREF watching covers the workspace folders independently of the output root, so an output root
+outside the projects still receives incremental updates. Overlapping workspace folders share one
+update queue. Automatic common-parent detection respects directory-name capitalization on Unix
+and compares names case-insensitively on Windows.
+
+Proparse results and diagrams use the same project/source folder layout beneath their output
+directories. Nested projects retain their paths relative to the output root. External projects
+use `_external/<folder-name>-<path-hash>` subfolders so matching filenames do not overwrite each
+other. After upgrading, rerun **CrossWayAI: Proparse All Projects** and regenerate diagrams for
+nested or external projects to use this layout. Existing generated files are not moved.
+
 
 ## Diagram Exclusions
 
@@ -121,24 +165,23 @@ and via context menus:
 
 ## Release Notes
 
-### 1.9.2
-  - Bug Fixes:
-    - corrected double-click tooltip navigation on Windows to open the right overloaded method/constructor and highlight the full target method, constructor, property, or procedure range
-    - corrected AI disabled/configuration message to use generic AI feature wording for both node summaries and Table Relations diagram
-    - patched existing `.crosswayai/crosswayai_settings.json` files with missing default configuration keys during extension activation while preserving user values
-    - corrected AI node summary generation 
-    - corrected XREF watcher logging
-    - corrected incremental XREF updates to pick up newly added include files and clean stale dependency map entries more reliably
-    - added a warning popup and CrossWayAILog message when dependency map generation finds missing XREF files
-    - corrected AI summary icon visibility so virtual .pl nodes no longer show summary actions
-    - corrected multi-project persistent procedure RUN mapping so persistent procedure files and internal procedure calls appear in Impact and Call diagrams
-    - added logic to close the viewer and remove stale Mermaid diagrams when source files are deleted, including in multi-project workspaces where files may share the same name
-  - Improvements:
-    - documented that AI features use workspace plain text, including source files for AI node summaries and dumped `.df` schema text for Table Relations diagrams
-    - AI node summaries are now persisted in `dsMap.json`, reused before prompting AI again, and can be regenerated from the summary tooltip reload button
-    - Mermaid `.md` diagrams now mirror the original source folder structure (`<project>/<source>/...`) under `.crosswayai/mermaid`, matching the xref layout, so diagrams for files that share a base name across different folders or projects no longer overwrite each other; on activation, old-version `.md` diagrams left directly under `.crosswayai/mermaid` (from before the folder-structured layout) are automatically removed
-    - unified `public-property` and `inherited-property` impact diagram links under the generic `property` label
-    - refactored code for impact and call diagram to increase performance
+### 2.0.0
+
+- Improvements:
+    - pruned unlinked `.p` and `.i` file nodes from `dsMap.json` to reduce generated map size
+    - added quick navigation buttons (⌃/⌄) next to search count in `CrossWayAI Viewer` for iterating through search results
+    - normalized `ttFileNode.FileRelPath` values to use forward slashes in generated `dsMap.json` while preserving compatibility with existing backslash paths and  OS-native file lookups
+
+- Bug Fixes:
+    - fixed duplicate source-path collection so the same file is only loaded once, and added the `crosswayai.workspaceRoot` override for explicitly pinning the workspace root while preserving automatic `.code-workspace` detection when unset.
+    - corrected double-click tooltip navigation to internal procedures so the whole procedure body is selected when it is closed with `END.` instead of `END PROCEDURE.`; previously only the declaration line of the last internal procedure in a file was selected
+    - corrected XREF-to-source mapping so outgoing references appear in Impact, Include and Call diagrams after a procedure is moved to its source directory root, without matching same-named files in other folders
+    - corrected the missing XREF files warning to show the absolute path of `crosswayai.log` instead of the relative `.crosswayai/crosswayai.log` path, so the log file can be opened directly from the CrossWayAILog output channel
+    - corrected invoke tooltip double-click navigation for multiline method and constructor declarations, addressing Unix target selection; preserved name-only lookup and explicit no-parameter overload selection
+    - corrected XREF parsing for files that use work tables (`DEFINE WORKFILE` / `DEFINE WORK-TABLE`), which failed with `Entry 2 is outside the range of list <name>. (560)` and left those files without any dependency links
+    - corrected XREF lookup for projects with more than two source directories by using the `openedge-project.json` source entries instead of fixed `.pct0` / `.pct1` paths
+    - Stopped `CrossWayAILog` from opening automatically and stealing focus; logs remain available in the Output panel.
+    - Added an error notification when a Mermaid diagram cannot be saved.
 
 For the full release history, see the [CHANGELOG](./CHANGELOG.md).
 ---

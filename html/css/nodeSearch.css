@@ -8,7 +8,7 @@
       border: 1px solid #4b5563;
       border-radius: 6px;
       color: #e5e7eb;
-      padding: 5px 28px 5px 8px;
+      padding: 5px 50px 5px 8px;
       font-size: 13px;
       width: 160px;
       outline: none;
@@ -21,10 +21,40 @@
     }
     #searchCount {
       position: absolute;
-      right: 8px;
+      right: 23px;
       top: 50%;
       transform: translateY(-50%);
       color: #9ca3af;
       font-size: 11px;
       pointer-events: none;
+    }
+    .search-nav-btn {
+      position: absolute;
+      padding: 0;
+      width: 14px;
+      height: 14px;
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 12px;
+      cursor: pointer;
+      transition: color 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      right: 8px;
+    }
+    #prevSearchResult {
+      top: 20%;
+    }
+    #nextSearchResult {
+      top: 30%;
+    }
+    .search-nav-btn:hover:not(:disabled) {
+      color: #3b82f6;
+    }
+    .search-nav-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
     }

@@ -28,6 +28,39 @@ setCrossWayAILog(CrossWayAILog);
 const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible, closeMermaidViewerForFile } = createMermaidViewer();
 
 let activeGeneratedDiagram = null;
+let xrefWatcherLifecycle = null;
+
+function registerXrefWatcherLifecycle(context, initialRoot) {
+    let activeWatcher = setupXrefWatcher(context, initialRoot);
+    let disposed = false;
+
+    function restartWatcher(reason) {
+        if (disposed) return;
+        if (activeWatcher) activeWatcher.dispose();
+        activeWatcher = null;
+
+        const workspaceRoot = vscode.workspace.workspaceFolders?.length ? getWorkspaceRoot() : null;
+        CrossWayAILog.appendLine(`Restarting XREF watcher (${reason}); workspace root: ${workspaceRoot || '(none)'}.`);
+        if (!workspaceRoot) return;
+
+        ensureWorkspaceSettingsFile(workspaceRoot);
+        activeWatcher = setupXrefWatcher(context, workspaceRoot);
+    }
+
+    const listeners = [
+        vscode.workspace.onDidChangeConfiguration(() => restartWatcher('configuration changed')),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => restartWatcher('workspace folders changed'))
+    ];
+
+    return {
+        dispose() {
+            if (disposed) return;
+            disposed = true;
+            listeners.forEach(listener => listener.dispose());
+            if (activeWatcher) activeWatcher.dispose();
+        }
+    };
+}
 
 function ensureWorkspaceSettingsFile(workspaceRoot = getWorkspaceRoot()) {
     try {
@@ -69,7 +102,6 @@ function activate(context) {
 
     const proparserCompilePromise = ensureProparserCompiled(context).catch(error => {
         CrossWayAILog.appendLine(`>Proparse: Unexpected Proparser compile check error: ${error.message}`);
-        CrossWayAILog.show(true);
         return false;
     });
 
@@ -127,7 +159,6 @@ function activate(context) {
         if (removedDiagramPaths.length > 0) {
             closeMermaidViewerForFile(workspaceRoot, removedDiagramPaths);
             CrossWayAILog.appendLine(`Removed ${removedDiagramPaths.length} Mermaid diagram file(s) for deleted source: ${deletedFilePath}`);
-            CrossWayAILog.show(true);
         }
     };
 
@@ -150,7 +181,8 @@ function activate(context) {
         { name: 'crosswayai.openProparseFile', handler: handleOpenProparseFile }
     ];
 
-    setupXrefWatcher(context);
+    xrefWatcherLifecycle = registerXrefWatcherLifecycle(context, workspaceRoot);
+    context.subscriptions.push(xrefWatcherLifecycle);
 
     const fileDeleteDisposable = vscode.workspace.onDidDeleteFiles((event) => {
         event.files.forEach(handleFileDelete);
@@ -184,6 +216,8 @@ function activate(context) {
 }
 
 function deactivate() {
+    if (xrefWatcherLifecycle) xrefWatcherLifecycle.dispose();
+    xrefWatcherLifecycle = null;
     setRefreshActiveMermaidDiagramHandler(null);
     deactivateMermaidViewer();
 }

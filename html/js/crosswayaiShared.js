@@ -23,7 +23,7 @@ function openNodeFile(nodeId, targetType, targetName, signature) {
   // signature string – which represents the no-parameter overload, e.g. the
   // "( )" entry – is still forwarded. Dropping it here would make the editor
   // fall back to the first method definition with that name.
-  if (signature !== null) {
+  if (signature !== undefined && signature !== null) {
     message.signature = signature;
   }
   // Debug: log the outgoing message for troubleshooting

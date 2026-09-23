@@ -17,16 +17,21 @@ function logCrossWayAI(message) {
     }
 }
 
+// Absolute path of the on-disk .crosswayai/crosswayai.log file — distinct from
+// getCrossWayAILog(), which returns the VS Code output channel.
+function getCrosswayaiLogFilePath(workspaceRoot) {
+    return path.join(workspaceRoot, '.crosswayai', 'crosswayai.log');
+}
+
 function appendToLogFile(workspaceRoot, message) {
     if (!workspaceRoot || !message) {
         return;
     }
 
     try {
-        const logDirectory = path.join(workspaceRoot, '.crosswayai');
-        const logFile = path.join(logDirectory, 'crosswayai.log');
+        const logFile = getCrosswayaiLogFilePath(workspaceRoot);
 
-        fs.mkdirSync(logDirectory, { recursive: true });
+        fs.mkdirSync(path.dirname(logFile), { recursive: true });
         fs.appendFileSync(logFile, `${new Date().toISOString()} ${message}\n`);
     } catch (error) {
         logCrossWayAI(`>Warning: failed to write to crosswayai.log file: ${error.message}`);
@@ -37,5 +42,6 @@ module.exports = {
     setCrossWayAILog,
     getCrossWayAILog,
     logCrossWayAI,
+    getCrosswayaiLogFilePath,
     appendToLogFile
 };

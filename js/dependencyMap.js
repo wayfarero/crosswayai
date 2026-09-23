@@ -2,28 +2,24 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { runABLScript, cleanupDirectory } = require('./diagramCommon');
-const { getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
+const { getDsMapPath, getDsMapJsonObject, dedupeFilesByPath } = require('./dsMapStore');
 const { getWorkspaceRoot, getProjectNameForFolder, loadOpenEdgeProjectConfig, findSourceFiles } = require('./workspaceProjects');
 const { setAnalysisRunning } = require('./analysisState');
-const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { getCrossWayAILog, getCrosswayaiLogFilePath } = require('./crosswayaiLogger');
 
-const MISSING_XREF_WARNING_MESSAGE = 'CrossWayAI: Dependency map generation completed with missing XREF files. Some relationships may be incomplete. See CrossWayAILog and .crosswayai/crosswayai.log for details.';
 const MISSING_XREF_LOG_PATTERNS = [
     '.xref file not found for',
     'no .xref file found for'
 ];
 
 
-function appendLogLineSafely(CrossWayAILog, message, { show = false } = {}) {
+function appendLogLineSafely(CrossWayAILog, message) {
     if (!CrossWayAILog) {
         return false;
     }
 
     try {
         CrossWayAILog.appendLine(message);
-        if (show) {
-            CrossWayAILog.show(true);
-        }
         return true;
     } catch (error) {
         return false;
@@ -66,20 +62,25 @@ function getWorkspaceProjectsSourceDirMap(workspaceFolders, workspaceRoot) {
 }
 
 function getMissingXrefLogStatus(workspaceRoot) {
-    const logPath = path.join(workspaceRoot, '.crosswayai', 'crosswayai.log');
+    const logPath = getCrosswayaiLogFilePath(workspaceRoot);
     if (!fs.existsSync(logPath)) {
-        return { hasEntries: false, error: null };
+        return { logPath, hasEntries: false, error: null };
     }
 
     try {
         const logContent = fs.readFileSync(logPath, 'utf8').toLowerCase();
         return {
+            logPath,
             hasEntries: MISSING_XREF_LOG_PATTERNS.some(pattern => logContent.includes(pattern)),
             error: null
         };
     } catch (error) {
-        return { hasEntries: false, error };
+        return { logPath, hasEntries: false, error };
     }
+}
+
+function buildMissingXrefWarningMessage(logFilePath) {
+    return `CrossWayAI: Dependency map generation completed with missing XREF files. Some relationships may be incomplete. See CrossWayAILog and ${logFilePath} for details.`;
 }
 
 function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
@@ -87,8 +88,7 @@ function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
     if (missingXrefLogStatus.error) {
         appendLogLineSafely(
             CrossWayAILog,
-            `>Warning: Failed to inspect crosswayai.log for missing XREF entries: ${missingXrefLogStatus.error.message}`,
-            { show: true }
+            `>Warning: Failed to inspect crosswayai.log for missing XREF entries: ${missingXrefLogStatus.error.message}`
         );
         return false;
     }
@@ -97,9 +97,10 @@ function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
         return false;
     }
 
-    appendLogLineSafely(CrossWayAILog, MISSING_XREF_WARNING_MESSAGE, { show: true });
+    const warningMessage = buildMissingXrefWarningMessage(missingXrefLogStatus.logPath);
+    appendLogLineSafely(CrossWayAILog, warningMessage);
 
-    vscode.window.showWarningMessage(MISSING_XREF_WARNING_MESSAGE);
+    vscode.window.showWarningMessage(warningMessage);
     return true;
 }
 
@@ -115,7 +116,6 @@ async function generateDependencyMap(context) {
     }
 
     CrossWayAILog.appendLine(`\nStarted generating dependency map for workspace: ${workspaceRoot} ...`);
-    CrossWayAILog.show(true);
     
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
     
@@ -123,7 +123,6 @@ async function generateDependencyMap(context) {
         fs.mkdirSync(crosswayaiDir);
     }
     CrossWayAILog.appendLine(`>crosswayaiDir created: ${crosswayaiDir}`);
-    CrossWayAILog.show(true);
     
     const projectResults = [];
     const workspaceFolders = vscode.workspace.workspaceFolders || [];
@@ -151,7 +150,6 @@ async function generateDependencyMap(context) {
             const projectSourceDirPaths = workspaceProjectsSourceDirMap.get(projectRoot) || [];
 
             CrossWayAILog.appendLine(`>projectName (${projectName}), projectSubPath (${projectSubPath}), sourcePaths: ${projectSourceDirPaths}`);
-            CrossWayAILog.show(true);
 
             const dsMap = await findSourceFiles(projectRoot, projectSourceDirPaths, projectSubPath);
 
@@ -162,7 +160,16 @@ async function generateDependencyMap(context) {
                 try {
                     const dsMapJson = JSON.parse(fs.readFileSync(dsMapPath, 'utf8'));
                     if (dsMapJson.dsMap && dsMapJson.dsMap.ttFile) {
-                        dsMap.dsMap.ttFile = dsMapJson.dsMap.ttFile.concat(dsMap.dsMap.ttFile);
+                        // Projects declaring the same source directory collect the same file twice
+                        const mergedFiles = dsMapJson.dsMap.ttFile.concat(dsMap.dsMap.ttFile);
+                        const uniqueFiles = dedupeFilesByPath(mergedFiles);
+                        const duplicateCount = mergedFiles.length - uniqueFiles.length;
+
+                        if (duplicateCount > 0) {
+                            CrossWayAILog.appendLine(`>Skipped ${duplicateCount} file(s) for ${projectName} already collected from another project.`);
+                        }
+
+                        dsMap.dsMap.ttFile = uniqueFiles;
                     }
                 } catch (error) {
                     appendLogLineSafely(CrossWayAILog, `>Warning: Failed to read existing dsMap.json, starting fresh: ${error.message}`);
@@ -172,14 +179,13 @@ async function generateDependencyMap(context) {
 
             const totalCount = getDsMapFileCount(workspaceRoot);
             const deltaCount = totalCount - prevCount;
+
             projectResults.push({ projectName, projectRoot, fileCount: deltaCount, success: true });
             CrossWayAILog.appendLine(`>Found ${deltaCount} files for ${projectName} (total: ${totalCount}).`);
-            CrossWayAILog.show(true);
 
         } catch (error) {
             projectResults.push({ projectName, projectRoot, success: false, error });
             CrossWayAILog.appendLine(`**Error during map generation for ${projectName}: ${error.message}`);
-            CrossWayAILog.show(true);
         }
     }
 
@@ -188,14 +194,12 @@ async function generateDependencyMap(context) {
 
     if (successfulProjects.length === 0) {
         CrossWayAILog.appendLine("**No successful projects. Aborting analysis.");
-        CrossWayAILog.show(true);
         const failedNames = failedProjects.map(project => project.projectName).join(', ');
         vscode.window.showWarningMessage(`CrossWayAI: Dependency map generation failed for all projects: ${failedNames}. See CrossWayAILog for details.`);
         return;
     }
 
     CrossWayAILog.appendLine(`>Running ABL analysis...`);
-    CrossWayAILog.show(true);
     let ablAnalysisCompleted = false;
     try {
         setAnalysisRunning(true);
@@ -203,7 +207,6 @@ async function generateDependencyMap(context) {
         ablAnalysisCompleted = true;
     } catch (error) {
         CrossWayAILog.appendLine(`**Error during ABL analysis: ${error.message}`);
-        CrossWayAILog.show(true);
     } finally {
         setAnalysisRunning(false);
     }
@@ -213,7 +216,6 @@ async function generateDependencyMap(context) {
     }
 
     CrossWayAILog.appendLine("Done generating dependency map.\n");
-    CrossWayAILog.show(true);
 
     if (failedProjects.length > 0) {
         const failedNames = failedProjects.map(project => project.projectName).join(', ');

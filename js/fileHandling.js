@@ -68,6 +68,10 @@ function signatureMatches(defSig, targetSig) {
     return defTypes === targetTypes && defTypes !== '';
 }
 
+function isCallableDeclarationStart(lineText) {
+    return /^\s*(method|constructor|function)\b/i.test(String(lineText || ''));
+}
+
 function getCallableDefinition(lineText, targetName) {
     const text = String(lineText || '');
     const name = String(targetName || '').trim();
@@ -99,6 +103,34 @@ function getCallableDefinition(lineText, targetName) {
     };
 }
 
+function getCallableDeclaration(doc, startLine, targetName) {
+    if (!isCallableDeclarationStart(doc.lineAt(startLine).text)) {
+        return null;
+    }
+
+    let declarationText = '';
+
+    for (let i = startLine; i < doc.lineCount; i++) {
+        declarationText += (declarationText ? '\n' : '') + doc.lineAt(i).text;
+
+        if (!declarationText.includes(')')) {
+            continue;
+        }
+
+        const callableDef = getCallableDefinition(declarationText, targetName);
+        if (!callableDef) {
+            return null;
+        }
+
+        return {
+            ...callableDef,
+            declarationEndLine: i
+        };
+    }
+
+    return null;
+}
+
 function findCallableEndLine(doc, startLine, blockKind) {
     if (!blockKind) {
         return -1;
@@ -122,15 +154,14 @@ function findMethodRange(doc, methodName, signature) {
     }
     const targetNameLower = targetName.toLowerCase();
 
-    const hasSignature = signature !== null;
+    const hasSignature = signature !== undefined && signature !== null;
     // undefined/null means name-only lookup; "" is a real no-parameter overload.
     const signatureCandidates = hasSignature
         ? String(signature).split('|||').map((entry) => String(entry || '').trim())
         : [];
 
     function getRangeCandidate(lineIndex, requireSignatureMatch) {
-        const lineText = doc.lineAt(lineIndex).text;
-        const callableDef = getCallableDefinition(lineText, targetName);
+        const callableDef = getCallableDeclaration(doc, lineIndex, targetName);
         if (!callableDef || callableDef.name.toLowerCase() !== targetNameLower) {
             return null;
         }
@@ -150,7 +181,7 @@ function findMethodRange(doc, methodName, signature) {
 
         return {
             startLine: lineIndex,
-            endLine: closedBlockEndLine === -1 ? lineIndex : closedBlockEndLine,
+            endLine: closedBlockEndLine === -1 ? callableDef.declarationEndLine : closedBlockEndLine,
             hasClosedBlock: closedBlockEndLine !== -1
         };
     }
@@ -219,41 +250,127 @@ function findPropertyRange(doc, propertyName) {
     return [startLine, lastMatch];
 }
 
-function findProcedureRange(doc, procedureName) {
-    const escapedProcedureName = escapeRegExp(procedureName);
-    const startRegex = new RegExp(`^\\s*procedure\\s+${escapedProcedureName}\\s*:`, 'i');
-    const endProcedureRegex = /^\s*end\s+procedure\b.*\.\s*$/i;
-    const nextProcedureRegex = /^\s*procedure\s+[\w_]+\s*:/i;
+// Track block depth so END. closes the correct block.
+const BLOCK_KEYWORDS = 'do|for|repeat|case|catch|finally|editing|triggers';
+const BLOCK_OPENING_STATEMENT_REGEX = new RegExp(`\\b(?:${BLOCK_KEYWORDS})\\b[^:]*:$`, 'i');
+const STANDALONE_BLOCK_KEYWORD_REGEX = new RegExp(`^(?:${BLOCK_KEYWORDS}):$`, 'i');
+const END_STATEMENT_REGEX = /^end(?:\s+[\w-]+)*\s*\.$/i;
+// Not anchored at the end: a declaration may be followed by code on the same line.
+const PROCEDURE_DECLARATION_REGEX = /^procedure\s+[\w-]+\b[^:]*:/i;
+const BARE_LABEL_REGEX = /^[\w-]+:$/;
+const INCLUDE_REFERENCE_REGEX = /^\{.*\}$/;
 
-    let startLine = 0;
-    let found = false;
-    for (let i = 0; i < doc.lineCount; i++) {
-        const lineText = doc.lineAt(i).text;
-        if (startRegex.test(lineText)) {
-            startLine = i;
-            found = true;
+function stripAblComments(lineText, openCommentDepth) {
+    let text = '';
+    let commentDepth = openCommentDepth;
+
+    for (let i = 0; i < lineText.length; i++) {
+        const delimiter = lineText.slice(i, i + 2);
+        if (delimiter === '/*') {
+            commentDepth++;
+            i++;
+            continue;
+        }
+        if (delimiter === '*/' && commentDepth > 0) {
+            commentDepth--;
+            i++;
+            continue;
+        }
+        if (commentDepth > 0) {
+            continue;
+        }
+        if (delimiter === '//') {
             break;
+        }
+        text += lineText[i];
+    }
+
+    return { text: text.trim(), commentDepth };
+}
+
+// Carry block-comment depth across lines so commented-out code doesn't affect boundary detection.
+function getCommentStrippedLines(doc) {
+    const lines = [];
+    let commentDepth = 0;
+
+    for (let i = 0; i < doc.lineCount; i++) {
+        const strippedLine = stripAblComments(doc.lineAt(i).text, commentDepth);
+        commentDepth = strippedLine.commentDepth;
+        lines.push(strippedLine.text);
+    }
+
+    return lines;
+}
+
+function findProcedureStartLine(lines, procedureName) {
+    // Trailing options such as "PROCEDURE Internal4 PRIVATE:" are part of the declaration.
+    const startRegex = new RegExp(`^procedure\\s+${escapeRegExp(procedureName)}\\b[^:]*:`, 'i');
+    return lines.findIndex(lineText => startRegex.test(lineText));
+}
+
+function isBareBlockLabel(lineText) {
+    // "read-loop:" is a block label, while "DO:" is a block opener that stands alone.
+    return BARE_LABEL_REGEX.test(lineText) && !STANDALONE_BLOCK_KEYWORD_REGEX.test(lineText);
+}
+
+function findProcedureEndLine(lines, startLine) {
+    let blockDepth = 0;
+    let pendingStatement = '';
+
+    for (let i = startLine + 1; i < lines.length; i++) {
+        const lineText = lines[i];
+        if (!lineText) {
+            continue;
+        }
+
+        if (END_STATEMENT_REGEX.test(lineText)) {
+            pendingStatement = '';
+            if (blockDepth === 0) {
+                return i;
+            }
+            blockDepth--;
+            continue;
+        }
+
+        // An unterminated procedure ends before the next declaration since procedures cannot nest.
+        if (blockDepth === 0 && PROCEDURE_DECLARATION_REGEX.test(lineText)) {
+            return i - 1;
+        }
+
+        // Treat include references as full statements so they don't bleed into pendingStatement.
+        if (INCLUDE_REFERENCE_REGEX.test(lineText)) {
+            pendingStatement = '';
+            continue;
+        }
+
+        // Labels carry no block and may contain block keywords, so they must not raise depth.
+        // Only standalone labels qualify; multi-line block headers like "NO-LOCK:" look identical
+        // but continue the statement.
+        if (!pendingStatement && isBareBlockLabel(lineText)) {
+            continue;
+        }
+
+        // Match the opening ":" against the whole statement since block headers may span lines.
+        pendingStatement = `${pendingStatement} ${lineText}`.trim();
+        if (BLOCK_OPENING_STATEMENT_REGEX.test(pendingStatement)) {
+            blockDepth++;
+        }
+        if (/[.:]$/.test(lineText)) {
+            pendingStatement = '';
         }
     }
 
-    if (!found) {
+    return lines.length - 1;
+}
+
+function findProcedureRange(doc, procedureName) {
+    const lines = getCommentStrippedLines(doc);
+    const startLine = findProcedureStartLine(lines, procedureName);
+    if (startLine === -1) {
         return [0, 0];
     }
 
-    let endLine = startLine;
-    for (let i = startLine + 1; i < doc.lineCount; i++) {
-        const lineText = doc.lineAt(i).text;
-        if (endProcedureRegex.test(lineText)) {
-            endLine = i;
-            break;
-        }
-        if (nextProcedureRegex.test(lineText)) {
-            endLine = i - 1 >= startLine ? i - 1 : startLine;
-            break;
-        }
-    }
-
-    return [startLine, endLine];
+    return [startLine, findProcedureEndLine(lines, startLine)];
 }
 
 /**
