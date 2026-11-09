@@ -2,8 +2,9 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
-const { exec, spawn } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { DEFAULT_DLC_PROPATH_ENTRIES } = require('./extensionConstants');
+const { getJavaHomeSetting } = require('./crosswayaiSettings');
 
 
 // ─── PROPATH ─────────────────────────────────────────────────────────────────
@@ -136,50 +137,67 @@ function buildCombinedSchema(dumpDir, workspaceRoot, projectName) {
 
 /**
  * Resolves the path to the Java executable.
- * Checks the system PATH by running `java -version`.
+ * Uses JavaHome from crosswayai_settings.json when configured; otherwise checks PATH.
  *
+ * @param {string} workspaceRoot - Root containing .crosswayai/crosswayai_settings.json.
  * @returns {Promise<string|null>} Resolved java executable path, or null.
  */
-function resolveJavaPath() {
+function resolveJavaPath(workspaceRoot) {
 
     const CrossWayAILog = getCrossWayAILog();
+    const javaHome = getJavaHomeSetting(workspaceRoot);
+    const javaExecutable = getJavaExecutable(javaHome, 'java');
 
     return new Promise((resolve) => {
-        exec('java -version', (error) => {
+        execFile(javaExecutable, ['-version'], { windowsHide: true }, (error) => {
             if (error) {
-                if (CrossWayAILog) CrossWayAILog.appendLine('>Proparse: Java not found in PATH.');
+                const source = javaHome ? `configured JavaHome (${javaHome})` : 'PATH';
+                if (CrossWayAILog) CrossWayAILog.appendLine(`>Proparse: Java not found using ${source}.`);
                 resolve(null);
             } else {
-                resolve('java');
+                resolve(javaExecutable);
             }
         });
     });
+}
+
+function getJavaExecutable(javaHome, command) {
+    if (!javaHome) {
+        return command;
+    }
+
+    const executableName = process.platform === 'win32' ? `${command}.exe` : command;
+    return path.join(javaHome, 'bin', executableName);
 }
 
 /**
  * Resolves the exact javac version string used for Proparser compilation.
  *
- * @returns {Promise<string|null>} The javac version output, or null if javac is unavailable.
+ * @param {string} workspaceRoot - Root containing .crosswayai/crosswayai_settings.json.
+ * @returns {Promise<Object|null>} The javac executable and version, or null if unavailable.
  */
-function resolveJavacVersion() {
+function resolveJavac(workspaceRoot) {
 
     const CrossWayAILog = getCrossWayAILog();
+    const javaHome = getJavaHomeSetting(workspaceRoot);
+    const javacExecutable = getJavaExecutable(javaHome, 'javac');
 
     return new Promise((resolve) => {
-        exec('javac -version', (error, stdout, stderr) => {
+        execFile(javacExecutable, ['-version'], { windowsHide: true }, (error, stdout, stderr) => {
             if (error) {
-                if (CrossWayAILog) CrossWayAILog.appendLine('>Proparse: javac not found in PATH.');
+                const source = javaHome ? `configured JavaHome (${javaHome})` : 'PATH';
+                if (CrossWayAILog) CrossWayAILog.appendLine(`>Proparse: javac not found using ${source}.`);
                 resolve(null);
                 return;
             }
 
             const version = `${stdout || ''}${stderr || ''}`.trim();
-            resolve(version || null);
+            resolve(version ? { executable: javacExecutable, version } : null);
         });
     });
 }
 
-function compileProparser(proparsePath) {
+function compileProparser(proparsePath, javacExecutable) {
 
     const CrossWayAILog = getCrossWayAILog();
     const classpath = [
@@ -191,7 +209,7 @@ function compileProparser(proparsePath) {
     const args = ['-cp', classpath, '-d', proparsePath, sourcePath];
 
     return new Promise((resolve, reject) => {
-        const proc = spawn('javac', args, {
+        const proc = spawn(javacExecutable, args, {
             cwd: proparsePath,
             windowsHide: true
         });
@@ -229,22 +247,28 @@ function compileProparser(proparsePath) {
  * Ensures Proparser.class exists and matches the current javac version.
  *
  * @param {Object} context - VS Code extension context.
+ * @param {string} workspaceRoot - Root containing .crosswayai/crosswayai_settings.json.
  * @returns {Promise<boolean>} true when Proparser is ready; false when compilation failed.
  */
-async function ensureProparserCompiled(context) {
+async function ensureProparserCompiled(context, workspaceRoot) {
 
     const CrossWayAILog = getCrossWayAILog();
     const proparsePath = path.join(context.extensionPath, 'resources', 'proparse');
     const classPath = path.join(proparsePath, 'Proparser.class');
     const versionPath = path.join(proparsePath, 'Proparser.javac-version');
 
-    const javacVersion = await resolveJavacVersion();
-    if (!javacVersion) {
+    const javac = await resolveJavac(workspaceRoot);
+    if (!javac) {
+        const javaHome = getJavaHomeSetting(workspaceRoot);
+        const guidance = javaHome
+            ? `Check JavaHome in .crosswayai/crosswayai_settings.json: ${javaHome}`
+            : 'Install a JDK and add javac to your PATH.';
         vscode.window.showWarningMessage(
-            'CrossWayAI: javac not found. Proparser.java could not be compiled. Install a JDK and add javac to your PATH.'
+            `CrossWayAI: javac not found. Proparser.java could not be compiled. ${guidance}`
         );
         return false;
     }
+    const javacVersion = javac.version;
 
     let storedVersion = null;
     if (fs.existsSync(versionPath)) {
@@ -265,7 +289,7 @@ async function ensureProparserCompiled(context) {
     CrossWayAILog.appendLine(`>Proparse: ${reason}. Compiling with ${javacVersion}...`);
 
     try {
-        await compileProparser(proparsePath);
+        await compileProparser(proparsePath, javac.executable);
         if (!fs.existsSync(classPath)) {
             throw new Error('Proparser.class was not created.');
         }

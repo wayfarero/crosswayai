@@ -1,5 +1,21 @@
 # Changelog
 
+### 2.1.0
+- Improvements:
+    - added checked-by-default link-type filters to the `CrossWayAI Viewer` legend; unchecked relationship types and nodes no longer connected to the source are dimmed, mixed links remain visible when any enabled type applies, and filtering composes with the depth control
+    - added a `Show in Viewer` action to the editor and Explorer `File` context submenu that centers and temporarily highlights the selected file in the open diagram, or reports when the file is not part of it
+    - added optional multiple viewer instances, with one reusable panel per generated diagram and automatic XREF refresh for every open generated viewer
+    - added a `JavaHome` workspace setting to select the JDK used by Proparse, while preserving `PATH` lookup when the setting is empty
+    - the missing XREF files warning popup now points to the `CrossWayAILog` output channel and offers `Open Log File` and `Show Output` buttons, since file paths in VS Code popups are not clickable
+    - added ABL Enum `.cls` support to dependency maps: Enum definitions resolve to their physical source files, and Enum member references appear as `enum` edges with member details, an orange edge color, and a legend entry
+    - cleaned up stale diagrams when a source file loses its last dependency by closing the affected viewer, removing link-driven diagrams while preserving class package diagrams, and showing a clearer warning when no diagram can be generated
+    - pruned unlinked `.w` file nodes from `dsMap.json`, matching the existing behavior for `.p` and `.i` files
+    - reduced generated `dsMap.json` size by omitting temp-table fields that contain their default ABL values and by removing legacy helper temp-tables from the persisted `dataset dsMap`; the final JSON now keeps only the file/link/node/database tables that the viewer consumes
+    - aligned the viewer toolbar, status message, and legend to compact, consistent screen margins while keeping them clear of the diagram scrollbars
+
+- Bug Fixes:
+    - corrected XREF processing for compilation units that contain the same `RUN ... PERSISTENT` target more than once; repeated literal and dynamic targets no longer cause temp-table error 132 or abort analysis of the file
+
 ## 2.0.0
   - Improvements:
     - pruned unlinked `.p` and `.i` file nodes from `dsMap.json` to reduce generated map size

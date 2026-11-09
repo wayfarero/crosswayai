@@ -72,6 +72,9 @@
             ct.style.display = (prev && prev.style.display === 'none') ? 'none' : '';
           });
         }
+        if (typeof window.CROSSWAY_REFRESH_GRAPH_FADE === 'function') {
+          window.CROSSWAY_REFRESH_GRAPH_FADE();
+        }
       });
     }
 

@@ -64,6 +64,7 @@ function generateMermaidImpactGraph(dsMap, targetNode, graphType = 'LR') {
             lt.startsWith('run') ||
             lt.startsWith('public-property:') ||
             lt.startsWith('inherited-property:') ||
+            lt.startsWith('enum:') ||
             lt === 'include' ||
             lt === 'inherits:' ||
             lt === 'implements:' ||
@@ -108,5 +109,6 @@ function generateMermaidImpactGraph(dsMap, targetNode, graphType = 'LR') {
 }
 
 module.exports = {
-    generateImpactDiagram
+    generateImpactDiagram,
+    generateMermaidImpactGraph
 };

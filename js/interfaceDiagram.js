@@ -100,5 +100,6 @@ function generateMermaidInterfaceGraph(dsMap, targetNode, graphType = 'LR') {
     return getGraph();
 }
 module.exports = {
-    generateInterfaceDiagram
+    generateInterfaceDiagram,
+    generateMermaidInterfaceGraph
 };

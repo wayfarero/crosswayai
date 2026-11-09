@@ -16,5 +16,6 @@ function generateMermaidInstanceChainGraph(dsMap, targetNode, graphType = 'LR') 
 }
 
 module.exports = {
-    generateInstanceChainDiagram
+    generateInstanceChainDiagram,
+    generateMermaidInstanceChainGraph
 };

@@ -100,5 +100,6 @@ function generateMermaidInheritanceGraph(dsMap, targetNode, graphType = 'BT') {
 }
 
 module.exports = {
-    generateInheritanceDiagram
+    generateInheritanceDiagram,
+    generateMermaidInheritanceGraph
 };

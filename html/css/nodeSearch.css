@@ -16,6 +16,14 @@
     #nodeSearch:focus {
       border-color: #3b82f6;
     }
+
+    #diagram svg .node.show-in-viewer-node > rect,
+    #diagram svg .node.show-in-viewer-node > polygon,
+    #diagram svg .node.show-in-viewer-node > circle,
+    #diagram svg .node.show-in-viewer-node > ellipse,
+    #diagram svg .node.show-in-viewer-node > path {
+      fill: #fbbf24 !important;
+    }
     #nodeSearch::placeholder {
       color: #6b7280;
     }

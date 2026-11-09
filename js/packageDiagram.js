@@ -346,5 +346,6 @@ function generateMermaidPackageGraph(dsMap, targetNode, workspaceRoot) {
 }
 
 module.exports = {
-    generatePackageDiagram
+    generatePackageDiagram,
+    generateMermaidPackageGraph
 };

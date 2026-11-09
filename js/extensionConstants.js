@@ -52,11 +52,24 @@ const DIAGRAM_PREFIXES = [
     'property_access'
 ];
 
+// The package diagram is built from the ClassName values of all file nodes, not from
+// ttFileLink rows, so it stays valid for a class that has no dependencies left. Every
+// other diagram type is link driven and cannot be regenerated for a floating file.
+const LINK_INDEPENDENT_DIAGRAM_PREFIXES = ['package'];
+
+const SOURCE_FILE_MAP_STATE = {
+    MAPPED: 'mapped',
+    FLOATING: 'floating',
+    UNKNOWN: 'unknown'
+};
+
 module.exports = {
     KNOWN_OE_VERSIONS,
     FILE_TYPES,
     DEFAULT_DLC_PROPATH_ENTRIES,
     PROPERTY_RELATION_ALIASES,
     SUPPORTED_SOURCE_EXTENSIONS,
-    DIAGRAM_PREFIXES
+    DIAGRAM_PREFIXES,
+    LINK_INDEPENDENT_DIAGRAM_PREFIXES,
+    SOURCE_FILE_MAP_STATE
 };

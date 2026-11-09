@@ -100,6 +100,10 @@ function getEdgeTooltipSection(itemText) {
     return 'run';
   }
 
+  if (/\(enum\)\s*$/i.test(text) || lower === 'enum' || lower.startsWith('enum:')) {
+    return 'enum';
+  }
+
   if (
     /\((property|public-property|inherited-property)\)\s*$/i.test(text)
     || lower === 'property'
@@ -120,6 +124,7 @@ function getEdgeTooltipDisplayText(itemText) {
   return text
     .replace(/\s*\(invoke\)\s*$/i, '')
     .replace(/\s*\(run\)\s*$/i, '')
+    .replace(/\s*\(enum\)\s*$/i, '')
     .replace(/\s*\((property|public-property|inherited-property)\)\s*$/i, '')
     .trim();
 }
@@ -196,10 +201,11 @@ function showEdgeTooltip(items, event, metadataKey = null) {
     return;
   }
 
-  const sectionOrder = ['invoke', 'run', 'property'];
+  const sectionOrder = ['invoke', 'run', 'enum', 'property'];
   const sectionTitleByKey = {
     invoke: 'Invoke',
     run: 'Run',
+    enum: 'Enum',
     property: 'Property'
   };
 

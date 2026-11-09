@@ -11,6 +11,8 @@ const MISSING_XREF_LOG_PATTERNS = [
     '.xref file not found for',
     'no .xref file found for'
 ];
+const OPEN_LOG_FILE_ACTION = 'Open Log File';
+const SHOW_OUTPUT_ACTION = 'Show Output';
 
 
 function appendLogLineSafely(CrossWayAILog, message) {
@@ -80,7 +82,34 @@ function getMissingXrefLogStatus(workspaceRoot) {
 }
 
 function buildMissingXrefWarningMessage(logFilePath) {
-    return `CrossWayAI: Dependency map generation completed with missing XREF files. Some relationships may be incomplete. See CrossWayAILog and ${logFilePath} for details.`;
+    return `CrossWayAI: Dependency map generation completed with missing XREF files. Some relationships may be incomplete. See CrossWayAILog output channel and ${logFilePath} for details.`;
+}
+
+async function openLogFile(logFilePath, CrossWayAILog) {
+    try {
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFilePath));
+        await vscode.window.showTextDocument(document, { preview: false });
+    } catch (error) {
+        appendLogLineSafely(CrossWayAILog, `>Warning: Failed to open log file ${logFilePath}: ${error.message}`);
+        vscode.window.showErrorMessage(`CrossWayAI: Could not open ${path.basename(logFilePath)}. See CrossWayAILog output channel for details.`);
+    }
+}
+
+async function handleMissingXrefWarningAction(action, logFilePath, CrossWayAILog) {
+    if (action === OPEN_LOG_FILE_ACTION) {
+        await openLogFile(logFilePath, CrossWayAILog);
+        return;
+    }
+
+    if (action === SHOW_OUTPUT_ACTION && CrossWayAILog) {
+        CrossWayAILog.show();
+    }
+}
+
+// Popups do not turn file paths into links like the output channel does, so the log is reachable through action buttons.
+function showMissingXrefWarningNotification(warningMessage, logFilePath, CrossWayAILog) {
+    vscode.window.showWarningMessage(warningMessage, OPEN_LOG_FILE_ACTION, SHOW_OUTPUT_ACTION)
+        .then(action => handleMissingXrefWarningAction(action, logFilePath, CrossWayAILog));
 }
 
 function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
@@ -100,7 +129,7 @@ function showMissingXrefWarningIfNeeded(workspaceRoot, CrossWayAILog) {
     const warningMessage = buildMissingXrefWarningMessage(missingXrefLogStatus.logPath);
     appendLogLineSafely(CrossWayAILog, warningMessage);
 
-    vscode.window.showWarningMessage(warningMessage);
+    showMissingXrefWarningNotification(warningMessage, missingXrefLogStatus.logPath, CrossWayAILog);
     return true;
 }
 
@@ -118,7 +147,7 @@ async function generateDependencyMap(context) {
     CrossWayAILog.appendLine(`\nStarted generating dependency map for workspace: ${workspaceRoot} ...`);
     
     const crosswayaiDir = path.join(workspaceRoot, '.crosswayai');
-    
+
     if (!fs.existsSync(crosswayaiDir)) {
         fs.mkdirSync(crosswayaiDir);
     }
@@ -133,7 +162,7 @@ async function generateDependencyMap(context) {
     if (fs.existsSync(dsMapPath)) {
         fs.unlinkSync(dsMapPath);
     }
-    
+
     for (const folder of workspaceFolders) {
         const projectRoot = folder.uri.fsPath;
         const projectName = getProjectNameForFolder(folder);
@@ -143,7 +172,7 @@ async function generateDependencyMap(context) {
         // Skip the workspace root folder in multi-project workspaces
         if (workspaceFolders.length > 1 && path.normalize(projectRoot) === path.normalize(workspaceRoot)) {
             continue;
-        }       
+        }
 
         try {
 

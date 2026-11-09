@@ -16,8 +16,8 @@ function parseCallRelationLabel(rawLinkType) {
         return callLabel;
     }
     const lower = normalized.toLowerCase();
-    if (lower.startsWith('public-property:') || lower.startsWith('inherited-property:')) {
-        return parseNamedRelationLabel(normalized, ['public-property', 'inherited-property']);
+    if (lower.startsWith('public-property:') || lower.startsWith('inherited-property:') || lower.startsWith('enum:')) {
+        return parseNamedRelationLabel(normalized, ['public-property', 'inherited-property', 'enum']);
     }
     return '';
 }

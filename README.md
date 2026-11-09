@@ -43,7 +43,29 @@ For detailed setup instructions, see: [AI Configuration Guide](./resources/AI_CO
 
 ## Java Configuration
 
-To use Proparse support, you need to have a correctly installed and configured JDK in the PATH environment variable. This is mandatory for the Proparse functionalities to be available.
+To use Proparse support, install a JDK that provides both `java` and `javac`. By default, CrossWayAI uses the JDK available on `PATH`.
+
+To select a specific JDK, set `JavaHome` in `.crosswayai/crosswayai_settings.json` to the JDK installation folder, one level above its `bin` folder:
+
+```json
+{
+  "JavaHome": "C:\\Program Files\\Java\\jdk-25"
+}
+```
+
+An empty value (`"JavaHome": ""`) preserves the default `PATH` behavior. A non-empty value overrides `PATH` for both Java and Javac used by Proparse.
+
+## Viewer Configuration
+
+CrossWayAI reuses one viewer tab by default. To keep different generated diagrams open at the same time, enable multiple viewer instances in `.crosswayai/crosswayai_settings.json`:
+
+```json
+{
+  "multipleViewerInstances": true
+}
+```
+
+In multiple-viewer mode, each generated Markdown diagram has one viewer tab. Opening the same diagram again reuses its tab, while incremental XREF updates regenerate and refresh every open generated diagram. Close existing viewers or reload the extension after changing this setting.
 
 ## Before You Start
 
@@ -66,6 +88,7 @@ same xref are collapsed before incremental analysis updates the dependency data.
 2.  Open the Command Palette (`Ctrl+Shift+P`).
 3.  Run the **"CrossWayAI: Generate Dependency Map"** command.
     -  This will create a `.crosswayai` directory in your workspace root, generate an initial `dsMap.json` file containing your project's source files, and then execute the backend ABL process for a full analysis.
+    -  If some `.xref` files are missing, a warning popup reports that relationships may be incomplete. Use its **Open Log File** button to open `.crosswayai/crosswayai.log` in an editor, or **Show Output** to reveal the `CrossWayAILog` output channel.
 
 ![Generate Dependency Map](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/dependency.gif)
 
@@ -74,7 +97,7 @@ same xref are collapsed before incremental analysis updates the dependency data.
 ![Dump All DB Definitions](https://github.com/wayfarero/crosswayai/raw/main/resources/demo/dumpalldbdefinitions.gif)
 
 6. (optionally) run the **"CrossWayAI: Proparse All Projects"** command
-    - This will output corresponding proparse files of all workspace ABL files under the `.crosswayai\proparse` directory in your workspace root.
+    - This will output corresponding Proparse files for all workspace ABL files under the `.crosswayai\.proparse` directory in your workspace root.
 
 Once the analysis is complete, you can use the other commands to generate specific diagrams or to view the corresponding XREF or Proparse content of an ABL file.
 
@@ -137,7 +160,7 @@ enable users to generate table relationship diagrams using the chat agent.
 -   `CrossWayAI: Proparse All Projects`: (optional) Helper command to output proparse files for the whole workspace
 
 and via context menus:
-    
+
 - `Diagram`:
 
     - `Impact`: Generate an impact analysis diagram for the selected file.
@@ -150,6 +173,7 @@ and via context menus:
     - `Property Access`: Generate a property access chain diagram for the selected file.
     
 - `File`:
+    - `Show in Viewer`: When a diagram viewer is open, center and temporarily highlight the selected ABL file in the current diagram. The highlight clears on the next click in the viewer. If the file is not in that diagram, CrossWayAI shows an information message.
     - `XREF`: Open the corresponding XREF file for the selected file.
     - `PROPARSE`: Open the corresponding Proparse file for the selected file.
 
@@ -165,23 +189,20 @@ and via context menus:
 
 ## Release Notes
 
-### 2.0.0
-
+### 2.1.0
 - Improvements:
-    - pruned unlinked `.p` and `.i` file nodes from `dsMap.json` to reduce generated map size
-    - added quick navigation buttons (⌃/⌄) next to search count in `CrossWayAI Viewer` for iterating through search results
-    - normalized `ttFileNode.FileRelPath` values to use forward slashes in generated `dsMap.json` while preserving compatibility with existing backslash paths and  OS-native file lookups
+    - added checked-by-default link-type filters to the viewer legend, allowing relationship types and disconnected nodes to be dimmed while preserving the diagram layout and depth selection
+    - added optional multiple viewer instances, with one reusable viewer per generated diagram and automatic XREF refresh for all open generated viewers
+    - added a `JavaHome` workspace setting to select the JDK used by Proparse, while preserving `PATH` lookup when the setting is empty
+    - the missing XREF files warning popup now points to the `CrossWayAILog` output channel and offers `Open Log File` and `Show Output` buttons, since file paths in VS Code popups are not clickable
+    - added ABL Enum `.cls` support to dependency maps: Enum definitions resolve to their physical source files, and Enum member references appear as `enum` edges with member details, an orange edge color, and a legend entry
+    - cleaned up stale diagrams when a source file loses its last dependency by closing the affected viewer, removing link-driven diagrams while preserving class package diagrams, and showing a clearer warning when no diagram can be generated
+    - pruned unlinked `.w` file nodes from `dsMap.json`, matching the existing behavior for `.p` and `.i` files
+    - reduced generated `dsMap.json` size by omitting temp-table fields that contain their default ABL values and by removing legacy helper temp-tables from the persisted `dataset dsMap`; the final JSON now keeps only the file/link/node/database tables that the viewer consumes
+    - aligned the viewer toolbar, status message, and legend to compact, consistent screen margins while keeping them clear of the diagram scrollbars
 
 - Bug Fixes:
-    - fixed duplicate source-path collection so the same file is only loaded once, and added the `crosswayai.workspaceRoot` override for explicitly pinning the workspace root while preserving automatic `.code-workspace` detection when unset.
-    - corrected double-click tooltip navigation to internal procedures so the whole procedure body is selected when it is closed with `END.` instead of `END PROCEDURE.`; previously only the declaration line of the last internal procedure in a file was selected
-    - corrected XREF-to-source mapping so outgoing references appear in Impact, Include and Call diagrams after a procedure is moved to its source directory root, without matching same-named files in other folders
-    - corrected the missing XREF files warning to show the absolute path of `crosswayai.log` instead of the relative `.crosswayai/crosswayai.log` path, so the log file can be opened directly from the CrossWayAILog output channel
-    - corrected invoke tooltip double-click navigation for multiline method and constructor declarations, addressing Unix target selection; preserved name-only lookup and explicit no-parameter overload selection
-    - corrected XREF parsing for files that use work tables (`DEFINE WORKFILE` / `DEFINE WORK-TABLE`), which failed with `Entry 2 is outside the range of list <name>. (560)` and left those files without any dependency links
-    - corrected XREF lookup for projects with more than two source directories by using the `openedge-project.json` source entries instead of fixed `.pct0` / `.pct1` paths
-    - Stopped `CrossWayAILog` from opening automatically and stealing focus; logs remain available in the Output panel.
-    - Added an error notification when a Mermaid diagram cannot be saved.
+    - corrected XREF processing for compilation units that contain the same `RUN ... PERSISTENT` target more than once; repeated literal and dynamic targets no longer cause temp-table error 132 or abort analysis of the file
 
 For the full release history, see the [CHANGELOG](./CHANGELOG.md).
 ---

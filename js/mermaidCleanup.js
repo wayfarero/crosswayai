@@ -1,11 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const { 
-    SUPPORTED_SOURCE_EXTENSIONS, 
-    DIAGRAM_PREFIXES } = require('./extensionConstants');
 const {
-    getDsMapArray,
+    SUPPORTED_SOURCE_EXTENSIONS,
+    DIAGRAM_PREFIXES,
+    LINK_INDEPENDENT_DIAGRAM_PREFIXES } = require('./extensionConstants');
+const {
     getDsMapJsonObject,
+    findFileNodeByPath } = require('./dsMapStore');
+const {
     resolveMermaidRelativeDir,
     toMermaidNodeId } = require('./diagramCommon');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
@@ -94,6 +96,11 @@ function isDiagramMatch(filePath, matchContext) {
 
     const stem = path.basename(filePath, '.md');
     const matchingPrefix = DIAGRAM_PREFIXES.find(prefix => stem.toLowerCase().startsWith(prefix + '_'));
+
+    if (matchingPrefix && matchContext.keptDiagramTypes.includes(matchingPrefix)) {
+        return false;
+    }
+
     const targetName = matchingPrefix
         ? stem.slice(matchingPrefix.length + 1)
         : stem;
@@ -131,12 +138,7 @@ function findSourceFileNode(workspaceRoot, sourceFilePath) {
             return null;
         }
 
-        const fileNodes = getDsMapArray(dsMapJson, 'ttFileNode');
-        const normalizedPath = path.normalize(sourceFilePath).toLowerCase();
-        return fileNodes.find(node => {
-            const nodePath = path.normalize(node.FilePath || '').toLowerCase();
-            return nodePath === normalizedPath;
-        }) || null;
+        return findFileNodeByPath(dsMapJson, sourceFilePath);
     } catch (error) {
         logCleanupMessage(`Failed to look up source file in dsMap for Mermaid cleanup: ${error.message}`);
         return null;
@@ -222,7 +224,26 @@ function deleteDiagramFiles(matchedPaths) {
     return removedPaths;
 }
 
-function removeMermaidDiagramsForSourceFile(workspaceRoot, sourceFilePath, mermaidRelativeDir = '') {
+/**
+ * A persisted diagram identifies its subject by NodeId, so cleanup has to know that
+ * NodeId. Once a node is pruned it can no longer be read from dsMap.json, which is
+ * why the caller may pass the value it captured before the analysis run.
+ */
+function resolveMatchNodeId(explicitNodeId, sourceFileNode) {
+    if (explicitNodeId !== undefined && explicitNodeId !== null) {
+        return explicitNodeId;
+    }
+
+    return sourceFileNode && sourceFileNode.NodeId ? sourceFileNode.NodeId : null;
+}
+
+/**
+ * @param {Object} [options]
+ * @param {number} [options.nodeId] - NodeId to match against %%CROSSWAY_SOURCE_NODE
+ *        when the node is no longer in dsMap.json.
+ * @param {string[]} [options.keepDiagramTypes] - Diagram prefixes to leave on disk.
+ */
+function removeMermaidDiagramsForSourceFile(workspaceRoot, sourceFilePath, mermaidRelativeDir = '', options = {}) {
     if (!workspaceRoot || !sourceFilePath || !isSupportedSourceFilePath(sourceFilePath)) {
         return [];
     }
@@ -235,14 +256,38 @@ function removeMermaidDiagramsForSourceFile(workspaceRoot, sourceFilePath, merma
         sourceFilePath,
         sourceFileName: path.basename(sourceFilePath),
         sourceBaseName: path.basename(sourceFilePath, path.extname(sourceFilePath)),
-        nodeId: sourceFileNode && sourceFileNode.NodeId ? sourceFileNode.NodeId : null
+        nodeId: resolveMatchNodeId(options.nodeId, sourceFileNode),
+        keptDiagramTypes: options.keepDiagramTypes || []
     };
 
     const matchedPaths = collectMatchingDiagramPaths(scanTarget, matchContext);
     return deleteDiagramFiles(matchedPaths);
 }
 
+/**
+ * Removes the persisted diagrams of files that lost their last dependency. Class
+ * files keep their package diagram, which does not depend on links at all.
+ * @param {Array<{filePath: string, nodeId: (number|null), isClass: boolean}>} floatingFiles
+ * @returns {string[]} Absolute paths of the removed diagram files.
+ */
+function removeMermaidDiagramsForFloatingFiles(workspaceRoot, floatingFiles) {
+    const removedPaths = [];
+
+    (floatingFiles || []).forEach(floatingFile => {
+        const keepDiagramTypes = floatingFile.isClass ? LINK_INDEPENDENT_DIAGRAM_PREFIXES : [];
+        const removed = removeMermaidDiagramsForSourceFile(workspaceRoot, floatingFile.filePath, '', {
+            nodeId: floatingFile.nodeId,
+            keepDiagramTypes
+        });
+
+        removedPaths.push(...removed);
+    });
+
+    return removedPaths;
+}
+
 module.exports = {
     isSupportedSourceFilePath,
-    removeMermaidDiagramsForSourceFile
+    removeMermaidDiagramsForSourceFile,
+    removeMermaidDiagramsForFloatingFiles
 };

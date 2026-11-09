@@ -1,4 +1,6 @@
 {
+  "JavaHome": "",
+  "multipleViewerInstances": false,
   "ai": {
     "enabled": false,
     "provider": "vscode"

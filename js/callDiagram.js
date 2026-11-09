@@ -77,5 +77,6 @@ function generateMermaidCallGraph(dsMap, targetNode, graphType = 'LR') {
 }
 
 module.exports = {
-    generateCallDiagram
+    generateCallDiagram,
+    generateMermaidCallGraph
 };

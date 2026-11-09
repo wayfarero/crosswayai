@@ -12,12 +12,37 @@
     const status = document.getElementById('status');
     const stage = document.getElementById('stage');
     const diagram = document.getElementById('diagram');
+    const viewer = document.querySelector('.viewer');
     const nodeContextMenu = document.getElementById('nodeContextMenu');
+
+    function updateViewerScrollbarClearance() {
+      const rightScrollbarWidth = Math.max(0, stage.offsetWidth - stage.clientWidth);
+      const bottomScrollbarHeight = Math.max(0, stage.offsetHeight - stage.clientHeight);
+
+      viewer.style.setProperty('--viewer-right-scrollbar-clearance', `${rightScrollbarWidth}px`);
+      viewer.style.setProperty('--viewer-bottom-scrollbar-clearance', `${bottomScrollbarHeight}px`);
+    }
+
+    const stageResizeObserver = new ResizeObserver(updateViewerScrollbarClearance);
+    stageResizeObserver.observe(stage);
+    window.addEventListener('resize', updateViewerScrollbarClearance);
+    updateViewerScrollbarClearance();
 
     const params = new URLSearchParams(window.location.search);
     const mermaidMarkdownFilePath = params.get('file');
     const initialViewportStateParam = params.get('viewport');
     let LINK_TYPE_COLORS = {};
+    const EDGE_FILTER_TYPES = [
+      'include',
+      'call',
+      'cast',
+      'new',
+      'property',
+      'enum',
+      'inherits',
+      'implements'
+    ];
+    let enabledLegendEdgeTypes = new Set(EDGE_FILTER_TYPES);
     let suppressViewportStateBroadcast = false;
     let viewportBroadcastTimer = null;
 
@@ -82,6 +107,16 @@
     }
 
     window.CROSSWAY_ON_VIEWPORT_CHANGED = scheduleViewportStateBroadcast;
+
+    window.addEventListener('crosswayai:legend-filter-change', (event) => {
+      const enabledTypes = Array.isArray(event.detail?.enabledTypes)
+        ? event.detail.enabledTypes
+        : EDGE_FILTER_TYPES;
+      enabledLegendEdgeTypes = new Set(enabledTypes);
+      if (typeof window.CROSSWAY_REFRESH_GRAPH_FADE === 'function') {
+        window.CROSSWAY_REFRESH_GRAPH_FADE();
+      }
+    });
 
     function applyInitialViewportState() {
       if (!initialViewportState) {
@@ -306,61 +341,120 @@
         return clickTarget;
       }
 
-      function fadeGraphExceptPath(pathNodes, svgElement, pathEdges) {
-        const pathSet = pathNodes instanceof Set ? pathNodes : new Set(pathNodes || []);
-        const keepEdges = pathEdges instanceof Set ? pathEdges : new Set();
+      function getEdgeKey(edgeEl) {
+        const edgeIds = getEdgeIdentity(edgeEl);
+        return edgeIds ? `${edgeIds.from}->${edgeIds.to}` : null;
+      }
+
+      function getEdgeRelationshipTypes(edgeEl) {
+        const edgeKey = getEdgeKey(edgeEl);
+        const relationshipTypes = edgeKey ? window.CROSSWAY_EDGE_TYPES?.[edgeKey] : null;
+        return Array.isArray(relationshipTypes) ? relationshipTypes : null;
+      }
+
+      function isEdgeEnabledByLegend(edgeEl) {
+        const relationshipTypes = getEdgeRelationshipTypes(edgeEl);
+        if (!relationshipTypes) {
+          return true;
+        }
+        return relationshipTypes.some(type => enabledLegendEdgeTypes.has(type));
+      }
+
+      function isDepthVisible(element) {
+        return element && element.style.display !== 'none';
+      }
+
+      function isLegendFilteringActive() {
+        return enabledLegendEdgeTypes.size < EDGE_FILTER_TYPES.length;
+      }
+
+      function getLegendVisibleGraph(svgElement, diagramEdges) {
+        const allNodeIds = new Set();
         svgElement.querySelectorAll('.node').forEach(node => {
           const nodeId = getNodeIdentity(node);
-          node.style.opacity = nodeId && pathSet.has(nodeId) ? '1' : '0.1';
+          if (nodeId) {
+            allNodeIds.add(nodeId);
+          }
         });
 
-        const diagramEdges = getDiagramEdgeElements(svgElement);
+        if (!isLegendFilteringActive()) {
+          return {
+            nodeIds: allNodeIds,
+            edgeElements: new Set(diagramEdges)
+          };
+        }
+
+        const sourceNodeId = window.CROSSWAY_SOURCE_NODE;
+        const visibleNodeIds = new Set(sourceNodeId ? [sourceNodeId] : []);
+        const visibleEdgeElements = new Set();
+
         diagramEdges.forEach(edgeEl => {
+          if (!isDepthVisible(edgeEl) || !isEdgeEnabledByLegend(edgeEl)) {
+            return;
+          }
+          visibleEdgeElements.add(edgeEl);
+
           const edgeIds = getEdgeIdentity(edgeEl);
-          const isOnPath = edgeIds ? keepEdges.has(`${edgeIds.from}->${edgeIds.to}`) : false;
-          edgeEl.style.opacity = isOnPath ? '1' : '0.1';
+          if (!edgeIds) {
+            return;
+          }
+          visibleNodeIds.add(edgeIds.from);
+          visibleNodeIds.add(edgeIds.to);
         });
 
-        const edgeLabelGroups = getEdgeLabelGroups(svgElement);
-        edgeLabelGroups.forEach((labelGroup, index) => {
-          const edgeIds = getEdgeIdentity(labelGroup);
-          if (edgeIds) {
-            const isOnPath = keepEdges.has(`${edgeIds.from}->${edgeIds.to}`);
-            labelGroup.style.opacity = isOnPath ? '1' : '0.1';
-            return;
-          }
+        return {
+          nodeIds: visibleNodeIds,
+          edgeElements: visibleEdgeElements
+        };
+      }
 
-          // Some Mermaid builds do not expose edge ids on labels; in that case,
-          // map labels to edges by render order.
-          const mappedEdge = index < diagramEdges.length ? diagramEdges[index] : null;
-          const mappedIds = getEdgeIdentity(mappedEdge);
-          if (!mappedIds) {
-            labelGroup.style.opacity = '1';
-            return;
-          }
+      function applyGraphOpacity(svgElement, pathNodes = null, pathEdges = null) {
+        const diagramEdges = getDiagramEdgeElements(svgElement);
+        const legendVisibleGraph = getLegendVisibleGraph(svgElement, diagramEdges);
+        const pathNodeSet = pathNodes instanceof Set ? pathNodes : null;
+        const pathEdgeSet = pathEdges instanceof Set ? pathEdges : null;
+        const edgeByKey = new Map();
 
-          const isMappedEdgeOnPath = keepEdges.has(`${mappedIds.from}->${mappedIds.to}`);
-          labelGroup.style.opacity = isMappedEdgeOnPath ? '1' : '0.1';
+        diagramEdges.forEach(edgeEl => {
+          const edgeKey = getEdgeKey(edgeEl);
+          if (edgeKey) {
+            edgeByKey.set(edgeKey, edgeEl);
+          }
+        });
+
+        svgElement.querySelectorAll('.node').forEach(node => {
+          const nodeId = getNodeIdentity(node);
+          const visibleByLegend = nodeId && legendVisibleGraph.nodeIds.has(nodeId);
+          const visibleOnPath = !pathNodeSet || pathNodeSet.has(nodeId);
+          node.style.opacity = visibleByLegend && visibleOnPath ? '1' : '0.1';
+        });
+
+        diagramEdges.forEach(edgeEl => {
+          const edgeKey = getEdgeKey(edgeEl);
+          const visibleByLegend = legendVisibleGraph.edgeElements.has(edgeEl);
+          const visibleOnPath = !pathEdgeSet || (edgeKey && pathEdgeSet.has(edgeKey));
+          edgeEl.style.opacity = visibleByLegend && visibleOnPath ? '1' : '0.1';
+        });
+
+        getEdgeLabelGroups(svgElement).forEach((labelGroup, index) => {
+          const edgeKey = getEdgeKey(labelGroup);
+          const mappedEdge = diagramEdges[index];
+          const labelEdge = edgeByKey.get(edgeKey) || mappedEdge;
+          const visibleByLegend = labelEdge && legendVisibleGraph.edgeElements.has(labelEdge);
+          const mappedEdgeKey = getEdgeKey(labelEdge);
+          const visibleOnPath = !pathEdgeSet || (mappedEdgeKey && pathEdgeSet.has(mappedEdgeKey));
+          labelGroup.style.opacity = visibleByLegend && visibleOnPath ? '1' : '0.1';
         });
       }
 
+      function fadeGraphExceptPath(pathNodes, svgElement, pathEdges) {
+        const pathSet = pathNodes instanceof Set ? pathNodes : new Set(pathNodes || []);
+        const keepEdges = pathEdges instanceof Set ? pathEdges : new Set();
+        applyGraphOpacity(svgElement, pathSet, keepEdges);
+      }
+
       function resetGraphFade(svgElement) {
-
-        svgElement.querySelectorAll('.node').forEach(n => {
-          n.style.opacity = '1';
-        });
-
-        svgElement.querySelectorAll('path, line, polyline').forEach(e => {
-          if (!isDiagramEdgeElement(e)) {
-            return;
-          }
-          e.style.opacity = '1';
-        });
-
-        getEdgeLabelGroups(svgElement).forEach((labelGroup) => {
-          labelGroup.style.opacity = '1';
-        });
-
+        applyGraphOpacity(svgElement);
       }
 
       function getEdgeLabelGroups(svgElement) {
@@ -417,7 +511,7 @@
         return null;
       }
 
-      function buildEdgeGraph(svgElement) {
+      function buildEdgeGraph(svgElement, edgePredicate = null) {
         const outgoing = new Map();
         const incoming = new Map();
 
@@ -430,6 +524,9 @@
 
         svgElement.querySelectorAll('path, line, polyline').forEach(edgeEl => {
           if (!isDiagramEdgeElement(edgeEl)) {
+            return;
+          }
+          if (edgePredicate && !edgePredicate(edgeEl)) {
             return;
           }
           const edge = getEdgeIdentity(edgeEl);
@@ -451,7 +548,10 @@
           };
         }
 
-        const { outgoing, incoming } = buildEdgeGraph(svgElement);
+        const { outgoing, incoming } = buildEdgeGraph(
+          svgElement,
+          edgeEl => isDepthVisible(edgeEl) && isEdgeEnabledByLegend(edgeEl)
+        );
         
         function collectPaths(stepMap, reverseStepMap, edgeKeyBuilder) {
           const canReachSource = new Set([sourceNodeId]);
@@ -1024,7 +1124,16 @@
       };
       window.CROSSWAY_KEYDOWN_HANDLER = onKeyDown;
       document.addEventListener('keydown', onKeyDown);
+      window.CROSSWAY_REFRESH_GRAPH_FADE = () => {
+        if (lockedNode) {
+          const highlight = getHighlightSubgraph(lockedNode, svg);
+          fadeGraphExceptPath(highlight.nodes, svg, highlight.edges);
+          return;
+        }
+        resetGraphFade(svg);
+      };
       computeAndInitDepthFilter(svg, { buildEdgeGraph, getDiagramEdgeElements, getEdgeIdentity, getEdgeLabelGroups, getNodeIdentity });
+      resetGraphFade(svg);
     }
 
     function createOrGetOverlayLayer(svg) {
@@ -1125,6 +1234,7 @@
       window.CROSSWAY_PARENT_MAP = {};
       window.CROSSWAY_SOURCE_NODE = null;
       window.CROSSWAY_EDGE_DETAILS = {};
+      window.CROSSWAY_EDGE_TYPES = {};
       window.CROSSWAY_EDGE_METHOD_SIGS = {};
       window.CROSSWAY_EDGE_INDEX_KEYS = [];
       window.CROSSWAY_GLOBAL_METHOD_SIGS = {};
@@ -1149,6 +1259,15 @@
           window.CROSSWAY_EDGE_DETAILS = JSON.parse(edgeDetailsMatch[1]);
         } catch {
           window.CROSSWAY_EDGE_DETAILS = {};
+        }
+      }
+
+      const edgeTypesMatch = (code || '').match(/^\s*%%CROSSWAY_EDGE_TYPES:(.*)$/m);
+      if (edgeTypesMatch) {
+        try {
+          window.CROSSWAY_EDGE_TYPES = JSON.parse(edgeTypesMatch[1]);
+        } catch {
+          window.CROSSWAY_EDGE_TYPES = {};
         }
       }
 
@@ -1303,6 +1422,8 @@
         setStatus(`Loaded Mermaid from ${markdownPath}.`);
       } catch (err) {
         setStatus('Markdown load failed: ' + (err && err.message ? err.message : String(err)), true);
+      } finally {
+        window.parent.postMessage({ type: 'viewerReady' }, '*');
       }
     }
 

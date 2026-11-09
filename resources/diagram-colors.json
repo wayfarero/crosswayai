@@ -5,6 +5,7 @@
         "cast": "#ffd400",
         "new": "#0da33f",
         "property": "#7dd3a7",
+        "enum": "#f59e0b",
         "inherits": "#18e2ce",
         "implements": "#1fcce2",
         "circular": "#ff0000",
@@ -13,6 +14,7 @@
     },
     "nodeBorderColors": {
         "class": "#0da33f",
+        "enum": "#f59e0b",
         "include": "#ed1e97",
         "procedure": "#1d6be0",
         "screen": "#e0781c",

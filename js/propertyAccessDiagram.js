@@ -23,5 +23,6 @@ function generateMermaidPropertyAccessGraph(dsMap, targetNode, graphType = 'LR')
 }
 
 module.exports = {
-    generatePropertyAccessDiagram
+    generatePropertyAccessDiagram,
+    generateMermaidPropertyAccessGraph
 };

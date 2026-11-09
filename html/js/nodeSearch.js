@@ -10,6 +10,19 @@
     let searchHighlightedNodes = [];
     let searchResultNodes = [];           // Array of matched node elements (for navigation)
     let currentSearchIndex = -1;          // -1 = no active result; 0+ = active index
+    let showInViewerNode = null;
+
+    function clearShowInViewerHighlight() {
+      if (!showInViewerNode) return;
+      showInViewerNode.classList.remove('show-in-viewer-node');
+      showInViewerNode = null;
+    }
+
+    function highlightShowInViewerNode(node) {
+      clearShowInViewerHighlight();
+      showInViewerNode = node;
+      showInViewerNode.classList.add('show-in-viewer-node');
+    }
 
     function clearSearchHighlights() {
       searchHighlightedNodes.forEach(({ node, originalFill, originalStyleFill }) => {
@@ -53,69 +66,23 @@
     }
 
     function centerNodeInViewport(node) {
-      // Get the stage (scrollable container)
       const stageEl = document.getElementById('stage');
       if (!stageEl) return;
 
-      // Get the SVG element
-      const svg = diagram.querySelector('svg');
-      if (!svg) return;
-
-      // Get the node group's bounding box
-      const nodeBBox = node.getBBox ? node.getBBox() : node.getBoundingClientRect();
-
-      // If getBBox is available (SVG element), we need to convert to screen coordinates
-      let nodeScreenX, nodeScreenY, nodeScreenWidth, nodeScreenHeight;
-
-      if (typeof nodeBBox.x === 'number' && typeof nodeBBox.y === 'number') {
-        // SVG coordinate space (from getBBox)
-        const transform = node.getScreenCTM();
-        if (transform) {
-          nodeScreenX = transform.e + nodeBBox.x * transform.a;
-          nodeScreenY = transform.f + nodeBBox.y * transform.d;
-          nodeScreenWidth = nodeBBox.width * Math.abs(transform.a);
-          nodeScreenHeight = nodeBBox.height * Math.abs(transform.d);
-        } else {
-          // Fallback: use getBoundingClientRect
-          const rect = node.getBoundingClientRect();
-          nodeScreenX = rect.left;
-          nodeScreenY = rect.top;
-          nodeScreenWidth = rect.width;
-          nodeScreenHeight = rect.height;
-        }
-      } else {
-        // Already in screen coordinates
-        nodeScreenX = nodeBBox.left;
-        nodeScreenY = nodeBBox.top;
-        nodeScreenWidth = nodeBBox.width;
-        nodeScreenHeight = nodeBBox.height;
-      }
-
-      // Get the viewport center
-      const viewportWidth = stageEl.clientWidth;
-      const viewportHeight = stageEl.clientHeight;
-
-      // Calculate node center in screen space
-      const nodeCenterScreenX = nodeScreenX + nodeScreenWidth / 2;
-      const nodeCenterScreenY = nodeScreenY + nodeScreenHeight / 2;
-
-      // Get the diagram offset from viewport
-      const diagramRect = diagram.getBoundingClientRect();
       const stageRect = stageEl.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      const nodeCenterX = nodeRect.left + nodeRect.width / 2;
+      const nodeCenterY = nodeRect.top + nodeRect.height / 2;
+      const viewportCenterX = stageRect.left + stageEl.clientWidth / 2;
+      const viewportCenterY = stageRect.top + stageEl.clientHeight / 2;
+      const targetScrollLeft = stageEl.scrollLeft + nodeCenterX - viewportCenterX;
+      const targetScrollTop = stageEl.scrollTop + nodeCenterY - viewportCenterY;
+      const maxScrollLeft = Math.max(0, stageEl.scrollWidth - stageEl.clientWidth);
+      const maxScrollTop = Math.max(0, stageEl.scrollHeight - stageEl.clientHeight);
 
-      // Convert screen coordinates to diagram space (accounting for stage position)
-      const nodeCenterDiagramX = nodeCenterScreenX - diagramRect.left + stageEl.scrollLeft;
-      const nodeCenterDiagramY = nodeCenterScreenY - diagramRect.top + stageEl.scrollTop;
+      stageEl.scrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft));
+      stageEl.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
 
-      // Calculate target scroll to center the node
-      const targetScrollLeft = nodeCenterDiagramX - viewportWidth / 2;
-      const targetScrollTop = nodeCenterDiagramY - viewportHeight / 2;
-
-      // Apply scroll with bounds checking
-      stageEl.scrollLeft = Math.max(0, Math.min(targetScrollLeft, stageEl.scrollWidth - viewportWidth));
-      stageEl.scrollTop = Math.max(0, Math.min(targetScrollTop, stageEl.scrollHeight - viewportHeight));
-
-      // Trigger viewport change event if it exists
       if (typeof window.CROSSWAY_ON_VIEWPORT_CHANGED === 'function') {
         window.CROSSWAY_ON_VIEWPORT_CHANGED();
       }
@@ -159,6 +126,34 @@
           rect.style.fill = '#a7f3d0';  // pale green
         }
       });
+    }
+
+    function normalizeFilePath(filePath, caseInsensitive) {
+      const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+      return caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
+    }
+
+    function showFileNodeInViewer(message) {
+      clearShowInViewerHighlight();
+      const requestedPath = normalizeFilePath(message.filePath, message.caseInsensitive);
+      const fileMapEntry = Object.entries(window.CROSSWAY_FILE_MAP || {}).find(([, filePath]) => (
+        normalizeFilePath(filePath, message.caseInsensitive) === requestedPath
+      ));
+      const svg = diagram.querySelector('svg');
+      const node = fileMapEntry && svg
+        ? Array.from(svg.querySelectorAll('.node')).find((candidate) => getNodeIdentity(candidate) === fileMapEntry[0])
+        : null;
+
+      if (node) {
+        centerNodeInViewport(node);
+        highlightShowInViewerNode(node);
+      }
+
+      window.parent.postMessage({
+        type: 'showFileInViewerResult',
+        filePath: message.filePath,
+        found: Boolean(node)
+      }, '*');
     }
 
     function applySearchHighlights(query) {
@@ -250,4 +245,13 @@
     nextSearchBtn.addEventListener('click', (event) => {
       event.preventDefault();
       navigateSearchResults(1);   // Go to next result
+    });
+
+    document.getElementById('stage').addEventListener('click', clearShowInViewerHighlight);
+
+    window.addEventListener('message', (event) => {
+      const message = event.data || {};
+      if (message.type === 'showFileInViewer' && message.filePath) {
+        showFileNodeInViewer(message);
+      }
     });

@@ -8,6 +8,9 @@ const { getCrossWayAILog } = require('./crosswayaiLogger');
 const { setAnalysisRunning, getAnalysisRunning } = require('./analysisState');
 const { mapXrefToSourceInfo } = require('./xrefSourceMap');
 const { refreshActiveMermaidDiagram } = require('./mermaidRefreshState');
+const { collectNewlyFloatingSourceFiles } = require('./floatingNodes');
+const { removeMermaidDiagramsForFloatingFiles } = require('./mermaidCleanup');
+const { createMermaidViewer } = require('./crosswayaiContainer');
 
 const XREF_WATCHER_DELAY_MS = 2000;
 
@@ -224,11 +227,56 @@ async function processChangedXrefs({ context, workspaceRoot, changedXrefs, delet
 
         CrossWayAILog.appendLine('Incremental analysis complete.\n');
         if (!pendingXrefs.disposed) {
+            // Runs before the refresh: a diagram of a file that just lost its last
+            // reference can no longer be regenerated, so its viewer has to close
+            // instead of being asked to redraw.
+            cleanupDiagramsForNewlyFloatingFiles(workspaceRoot, dsMapJson);
             await refreshActiveMermaidDiagram(context);
         }
     } catch (error) {
         CrossWayAILog.appendLine(`Incremental analysis error: ${error.message}`);
     }
+}
+
+/**
+ * Handles the files that lost their last dependency during this analysis run. Their
+ * ttFileNode row is gone (.p/.i/.w) or unreferenced (.cls), so the diagrams still
+ * sitting in .crosswayai/mermaid can never be regenerated and the viewer would keep
+ * showing a graph that no longer reflects the code.
+ *
+ * @param {Object} previousDsMapJson - dsMap.json as it was before the ABL run; it is
+ *        the only place where a pruned node's NodeId can still be read.
+ */
+function cleanupDiagramsForNewlyFloatingFiles(workspaceRoot, previousDsMapJson) {
+    const CrossWayAILog = getCrossWayAILog();
+    const currentDsMapJson = getDsMapJsonObject(workspaceRoot, true);
+    if (!currentDsMapJson) {
+        return;
+    }
+
+    const floatingFiles = collectNewlyFloatingSourceFiles(previousDsMapJson, currentDsMapJson);
+    if (floatingFiles.length === 0) {
+        return;
+    }
+
+    floatingFiles.forEach(floatingFile => {
+        CrossWayAILog.appendLine(`No reference left to or from ${floatingFile.filePath}; removing its diagrams.`);
+    });
+
+    const removedDiagramPaths = removeMermaidDiagramsForFloatingFiles(workspaceRoot, floatingFiles);
+    if (removedDiagramPaths.length === 0) {
+        return;
+    }
+
+    CrossWayAILog.appendLine(`Removed ${removedDiagramPaths.length} Mermaid diagram file(s) for ${floatingFiles.length} file(s) without references.`);
+
+    const { closeMermaidViewerForFile } = createMermaidViewer();
+    if (!closeMermaidViewerForFile(workspaceRoot, removedDiagramPaths)) {
+        return;
+    }
+
+    const fileNames = floatingFiles.map(floatingFile => path.basename(floatingFile.filePath)).join(', ');
+    vscode.window.showWarningMessage(`CrossWayAI: ${fileNames} has no reference to or from any other file. Its diagrams were removed and the viewer was closed.`);
 }
 
 function mapXrefsToSourceFiles(xrefPaths, dsMapJson, options = {}) {

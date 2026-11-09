@@ -148,6 +148,24 @@ function getCrosswayAISettings(workspaceRoot) {
     }
 }
 
+function getJavaHomeSetting(workspaceRoot) {
+    try {
+        const settings = getSettingsJson(workspaceRoot);
+        return typeof settings?.JavaHome === 'string' ? settings.JavaHome.trim() : '';
+    } catch (error) {
+        return '';
+    }
+}
+
+function getMultipleViewerInstancesSetting(workspaceRoot) {
+    try {
+        const settings = getSettingsJson(workspaceRoot);
+        return settings?.multipleViewerInstances === true;
+    } catch (error) {
+        return false;
+    }
+}
+
 function getExclusionPathType(exclusionPath, rootDir) {
     const rawPath = String(exclusionPath || '').trim();
     if (!rawPath) {
@@ -224,5 +242,7 @@ module.exports = {
     getExclusionsSettings,
     isExcluded,
     createExclusionMatcher,
-    getCrosswayAISettings
+    getCrosswayAISettings,
+    getJavaHomeSetting,
+    getMultipleViewerInstancesSetting
 };

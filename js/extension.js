@@ -15,6 +15,8 @@ const { createMermaidViewer, cleanupLegacyMermaidDiagrams } = require('./crosswa
 const { removeMermaidDiagramsForSourceFile } = require('./mermaidCleanup');
 const { dumpDfFile, dumpAllDBDefinitions } = require('./dumpDfFile');
 const { getWorkspaceRoot } = require('./workspaceProjects');
+const { getDsMapJsonObject } = require('./dsMapStore');
+const { getSourceFileMapState, canGenerateDiagramForSource } = require('./floatingNodes');
 const { openXrefFile, openProparseFile } = require('./fileHandling');
 const { proparseAllProjects } = require('./proparseRunner');
 const { ensureProparserCompiled } = require('./proparseContext');
@@ -25,10 +27,22 @@ const { ensureSettingsFile } = require('./crosswayaiSettings');
 //Create output channel
 let CrossWayAILog = vscode.window.createOutputChannel("CrossWayAILog");
 setCrossWayAILog(CrossWayAILog);
-const { openCrosswayAIViewer, deactivateMermaidViewer, persistMermaid, isMermaidViewerVisible, closeMermaidViewerForFile } = createMermaidViewer();
+const {
+    openCrosswayAIViewer,
+    showFileInViewer,
+    deactivateMermaidViewer,
+    isMermaidViewerOpen,
+    usesMultipleViewerInstances,
+    closeMermaidViewerForFile
+} = createMermaidViewer();
 
-let activeGeneratedDiagram = null;
+const generatedDiagrams = new Map();
 let xrefWatcherLifecycle = null;
+
+function normalizeDiagramPath(diagramPath) {
+    const normalizedPath = path.resolve(diagramPath);
+    return process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath;
+}
 
 function registerXrefWatcherLifecycle(context, initialRoot) {
     let activeWatcher = setupXrefWatcher(context, initialRoot);
@@ -100,25 +114,57 @@ function activate(context) {
     // Remove old version flat .md diagrams left over from before the folder-structured layout.
     cleanupLegacyMermaidDiagrams(workspaceRoot);
 
-    const proparserCompilePromise = ensureProparserCompiled(context).catch(error => {
+    const proparserCompilePromise = ensureProparserCompiled(context, workspaceRoot).catch(error => {
         CrossWayAILog.appendLine(`>Proparse: Unexpected Proparser compile check error: ${error.message}`);
         return false;
     });
 
+    // Stop refreshing link-driven diagrams when their source becomes floating. A
+    // floating class remains trackable only for its link-independent package diagram.
+    function canRefreshGeneratedDiagram(generatedDiagram, dsMapJson) {
+        if (!dsMapJson) {
+            return true;
+        }
+
+        const sourceState = getSourceFileMapState(dsMapJson, generatedDiagram.uri.fsPath);
+        if (canGenerateDiagramForSource(
+            sourceState,
+            generatedDiagram.uri.fsPath,
+            generatedDiagram.diagramType
+        )) {
+            return true;
+        }
+
+        CrossWayAILog.appendLine(`Stopped tracking ${generatedDiagram.uri.fsPath}: the ${generatedDiagram.diagramType} diagram is no longer available.`);
+        return false;
+    }
+
     async function refreshActiveMermaidDiagram() {
-        if (!activeGeneratedDiagram) {
-            return;
-        }
+        const currentWorkspaceRoot = getWorkspaceRoot();
+        const dsMapJson = currentWorkspaceRoot ? getDsMapJsonObject(currentWorkspaceRoot, true) : null;
 
-        if (!isMermaidViewerVisible()) {
-            return;
-        }
+        for (const [diagramKey, generatedDiagram] of Array.from(generatedDiagrams.entries())) {
+            if (!isMermaidViewerOpen(generatedDiagram.savedPath)) {
+                generatedDiagrams.delete(diagramKey);
+                continue;
+            }
 
-        try {
-            CrossWayAILog.appendLine('Regenerating active Mermaid diagram after xref update.');
-            await activeGeneratedDiagram.handler(context, activeGeneratedDiagram.uri);
-        } catch (error) {
-            CrossWayAILog.appendLine(`Failed to regenerate active Mermaid diagram after xref update: ${error.message}`);
+            if (!canRefreshGeneratedDiagram(generatedDiagram, dsMapJson)) {
+                generatedDiagrams.delete(diagramKey);
+                continue;
+            }
+
+            try {
+                CrossWayAILog.appendLine(`Regenerating ${generatedDiagram.diagramType} Mermaid diagram after xref update: ${generatedDiagram.uri.fsPath}`);
+                const refreshedPath = await generatedDiagram.handler(context, generatedDiagram.uri);
+                if (refreshedPath && normalizeDiagramPath(refreshedPath) !== diagramKey) {
+                    generatedDiagrams.delete(diagramKey);
+                    generatedDiagram.savedPath = refreshedPath;
+                    generatedDiagrams.set(normalizeDiagramPath(refreshedPath), generatedDiagram);
+                }
+            } catch (error) {
+                CrossWayAILog.appendLine(`Failed to regenerate Mermaid diagram after xref update (${generatedDiagram.uri.fsPath}): ${error.message}`);
+            }
         }
     }
 
@@ -146,6 +192,9 @@ function activate(context) {
     };
     const handleOpenXrefFile = (ctx, uri) => openXrefFile(uri);
     const handleOpenProparseFile = (ctx, uri) => openProparseFile(uri);
+    const handleShowInViewer = (ctx, uri) => showFileInViewer(
+        uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri)
+    );
 
     const handleFileDelete = (uri) => {
         if (!uri || !uri.fsPath) {
@@ -158,27 +207,29 @@ function activate(context) {
 
         if (removedDiagramPaths.length > 0) {
             closeMermaidViewerForFile(workspaceRoot, removedDiagramPaths);
+            removedDiagramPaths.forEach(removedPath => generatedDiagrams.delete(normalizeDiagramPath(removedPath)));
             CrossWayAILog.appendLine(`Removed ${removedDiagramPaths.length} Mermaid diagram file(s) for deleted source: ${deletedFilePath}`);
         }
     };
 
     const commands = [
         { name: 'crosswayai.generateMap', handler: handleDependencyMap },
-        { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram, trackDiagram: true },
-        { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram, trackDiagram: true },
-        { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram, trackDiagram: true },
-        { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram, trackDiagram: true },
-        { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram, trackDiagram: true },
+        { name: 'crosswayai.generateImpactDiagram', handler: handleImpactDiagram, diagramType: 'impact' },
+        { name: 'crosswayai.generateIncludeDiagram', handler: handleIncludeDiagram, diagramType: 'include' },
+        { name: 'crosswayai.generateInterfaceDiagram', handler: handleInterfaceDiagram, diagramType: 'interface' },
+        { name: 'crosswayai.generateCallDiagram', handler: handleCallDiagram, diagramType: 'call' },
+        { name: 'crosswayai.generateInheritanceDiagram', handler: handleInheritanceDiagram, diagramType: 'inheritance' },
         { name: 'crosswayai.openCrosswayAIViewer', handler: openCrosswayAIViewer },
         { name: 'crosswayai.dumpDfFile', handler: handleDumpDfFile },
         { name: 'crosswayai.dumpAllDBDefinitions', handler: handleDumpAllDBDefinitions },
         { name: 'crosswayai.generateTableRelationsDiagram', handler: handleTableRelationsDiagram },
-        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram, trackDiagram: true },
-        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram, trackDiagram: true },
-        { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram, trackDiagram: true },
+        { name: 'crosswayai.generatePackageDiagram', handler: handlePackageDiagram, diagramType: 'package' },
+        { name: 'crosswayai.generateInstanceChainDiagram', handler: handleInstanceChainDiagram, diagramType: 'instance_chain' },
+        { name: 'crosswayai.generatePropertyAccessDiagram', handler: handlePropertyAccessDiagram, diagramType: 'property_access' },
         { name: 'crosswayai.proparseAllProjects', handler: handleProparseAllProjects },
         { name: 'crosswayai.openXrefFile', handler: handleOpenXrefFile },
-        { name: 'crosswayai.openProparseFile', handler: handleOpenProparseFile }
+        { name: 'crosswayai.openProparseFile', handler: handleOpenProparseFile },
+        { name: 'crosswayai.showInViewer', handler: handleShowInViewer }
     ];
 
     xrefWatcherLifecycle = registerXrefWatcherLifecycle(context, workspaceRoot);
@@ -195,14 +246,23 @@ function activate(context) {
         if (command.handler) {
             disposableCommand = vscode.commands.registerCommand(command.name, async (uri) => {
                 ensureWorkspaceSettingsFile();
-                const sourceUri = command.trackDiagram
+                const sourceUri = command.diagramType
                     ? (uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri))
                     : null;
 
-                await command.handler(context, uri);
+                const savedPath = await command.handler(context, uri);
 
-                if (sourceUri && sourceUri.fsPath) {
-                    activeGeneratedDiagram = { handler: command.handler, uri: sourceUri };
+                if (savedPath && sourceUri && sourceUri.fsPath) {
+                    if (!usesMultipleViewerInstances()) {
+                        generatedDiagrams.clear();
+                    }
+
+                    generatedDiagrams.set(normalizeDiagramPath(savedPath), {
+                        handler: command.handler,
+                        uri: sourceUri,
+                        diagramType: command.diagramType,
+                        savedPath
+                    });
                 }
             });
         } else {
@@ -219,6 +279,7 @@ function deactivate() {
     if (xrefWatcherLifecycle) xrefWatcherLifecycle.dispose();
     xrefWatcherLifecycle = null;
     setRefreshActiveMermaidDiagramHandler(null);
+    generatedDiagrams.clear();
     deactivateMermaidViewer();
 }
 

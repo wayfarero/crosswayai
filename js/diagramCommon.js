@@ -5,10 +5,62 @@ const { buildNodeLabel } = require('./nodeLabel');
 const { getCrossWayAILog, appendToLogFile } = require('./crosswayaiLogger');
 const diagramColors = require('../resources/diagram-colors.json');
 const { getExclusionsSettings, createExclusionMatcher } = require('./crosswayaiSettings');
-const { normalizeFsPath, getDsMapPath, getDsMapJsonObject } = require('./dsMapStore');
+const { normalizeFsPath, getDsMapPath, getDsMapJsonObject, getDsMapArray } = require('./dsMapStore');
+const {
+    getSourceFileMapState,
+    isLinkIndependentDiagramType,
+    canGenerateDiagramForSource } = require('./floatingNodes');
 const { getRuntimeDLC, getWorkspaceRoot, getSourceOutputRelativeDir } = require('./workspaceProjects');
-const { KNOWN_OE_VERSIONS } = require('./extensionConstants');
+const { KNOWN_OE_VERSIONS, SOURCE_FILE_MAP_STATE } = require('./extensionConstants');
 
+const OPENEDGE_ARGS_ENV = 'CROSSWAYAI_OPENEDGE_ARGS';
+
+function parseOpenEdgeArgs(value) {
+    const text = String(value || '').trim();
+    if (!text) {
+        return [];
+    }
+
+    const args = [];
+    const tokenPattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let match;
+    while ((match = tokenPattern.exec(text)) !== null) {
+        args.push(match[1] !== undefined ? match[1] : (match[2] !== undefined ? match[2] : match[3]));
+    }
+    return args;
+}
+
+function getConfiguredOpenEdgeArgs(env = process.env) {
+    return Object.prototype.hasOwnProperty.call(env, OPENEDGE_ARGS_ENV)
+        ? parseOpenEdgeArgs(env[OPENEDGE_ARGS_ENV])
+        : null;
+}
+
+function getOpenEdgeArgsFromProjectConfig(projectRoot) {
+    const projectJsonPath = path.join(projectRoot, 'openedge-project.json');
+    if (!fs.existsSync(projectJsonPath)) {
+        return [];
+    }
+
+    try {
+        const projectConfig = JSON.parse(fs.readFileSync(projectJsonPath, 'utf8'));
+        const charset = String(
+            projectConfig.cpinternal
+            || projectConfig.cpstream
+            || projectConfig.charset
+            || projectConfig.codepage
+            || ''
+        ).trim();
+        if (!charset) {
+            return [];
+        }
+
+        const cpcoll = String(projectConfig.cpcoll || projectConfig.collation || 'Basic').trim() || 'Basic';
+        return ['-cpinternal', charset, '-cpstream', charset, '-cpcoll', cpcoll];
+    } catch (error) {
+        return [];
+    }
+}
 
 async function cleanupDirectory(dirPath) {
     const CrossWayAILog = getCrossWayAILog();
@@ -88,7 +140,12 @@ async function runABLScript({ context, workspaceRoot, oeversion, scriptName, arg
     const runScriptPath = scriptName;
     const effectivePropath = `${extensionAblPath},${context.extensionPath},${prodictPath},${adecommPath}`;
     const executable = path.join(runtimeDLC, 'bin', '_progres');
+    const configuredOpenEdgeArgs = getConfiguredOpenEdgeArgs();
+    const projectOpenEdgeArgs = configuredOpenEdgeArgs !== null
+        ? configuredOpenEdgeArgs
+        : getOpenEdgeArgsFromProjectConfig(workspaceRoot);
     const args = [
+        ...projectOpenEdgeArgs,
         '-b',
         '-p',
         runScriptPath,
@@ -102,6 +159,9 @@ async function runABLScript({ context, workspaceRoot, oeversion, scriptName, arg
     }
 
     CrossWayAILog.appendLine(`>Spawning ABL process: ${executable} ${args.join(' ')}`);
+    if (projectOpenEdgeArgs.length) {
+        CrossWayAILog.appendLine(`>OpenEdge client args: ${projectOpenEdgeArgs.join(' ')}`);
+    }
     CrossWayAILog.appendLine(`>Logging to: ${logFile}`);
     return new Promise((resolve, reject) => {
         const ablProcess = require('child_process').spawn(executable, args);
@@ -128,10 +188,6 @@ async function runABLScript({ context, workspaceRoot, oeversion, scriptName, arg
 
 function toMermaidNodeId(value) {
     return String(value || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
-function getDsMapArray(dsMap, tableName) {
-    return (((dsMap || {}).dsMap || {})[tableName]) || [];
 }
 
 function findDsMapFileEntry(dsMap, sourceFilePath) {
@@ -863,7 +919,7 @@ function prependSourceMetadata(graph, referencedNode) {
     return `${sourceLine}\n${graphText}`;
 }
 
-function resolveDiagramContext(context, uri) {
+function resolveDiagramContext(context, uri, diagramType) {
     const CrossWayAILog = getCrossWayAILog();
     let filePath = '';
 
@@ -891,23 +947,45 @@ function resolveDiagramContext(context, uri) {
     const fileNodes = getDsMapArray(dsMapJson, 'ttFileNode');
     const fileLinks = getDsMapArray(dsMapJson, 'ttFileLink');
 
-    if (fileNodes.length === 0 || fileLinks.length === 0) {
-        vscode.window.showWarningMessage('CrossWayAI: dsMap.json is missing required relationship information. Regenerate the map first.');
+    const sourceState = getSourceFileMapState(dsMapJson, filePath);
+    if (!canGenerateDiagramForSource(sourceState, filePath, diagramType)) {
+        reportUnavailableDiagramSource(sourceState.status, filePath, workspaceRoot, CrossWayAILog);
         return null;
     }
 
-    const normalizedFilePath = path.normalize(filePath);
-    const referencedNode = fileNodes.find(node => node.FilePath && path.normalize(node.FilePath).toLowerCase() === normalizedFilePath.toLowerCase());
-    if (!referencedNode) {
-        vscode.window.showInformationMessage(`File ${path.basename(filePath)} not found in dsMap.json.`);
+    if (fileNodes.length === 0 || (!isLinkIndependentDiagramType(diagramType) && fileLinks.length === 0)) {
+        vscode.window.showWarningMessage('CrossWayAI: dsMap.json is missing required relationship information. Regenerate the map first.');
         return null;
     }
 
     return {
         workspaceRoot,
         dsMap: dsMapJson,
-        referencedNode
+        referencedNode: sourceState.fileNode
     };
+}
+
+/**
+ * A file present in ttFile is not necessarily available to link-driven diagrams.
+ * When it has no relationship in either direction, the user needs to hear that
+ * rather than a generic lookup failure. Floating classes retain their node only for
+ * package diagrams.
+ */
+function reportUnavailableDiagramSource(status, filePath, workspaceRoot, CrossWayAILog) {
+    const fileName = path.basename(filePath);
+    const isFloating = status === SOURCE_FILE_MAP_STATE.FLOATING;
+    const message = isFloating
+        ? `CrossWayAI: "${fileName}" has no reference to or from any other file, so there is nothing to diagram`
+        : `CrossWayAI: "${fileName}" is not part of the dependency map. Run "CrossWayAI: Generate Dependency Map" first.`;
+
+    // The notification stays on one line; what helps diagnose the cause goes to the log.
+    const logDetail = isFloating
+        ? ' It has no dependency-map links; check that the file is compiled and that something still references it (RUN, include, invoke, inherit).'
+        : '';
+
+    CrossWayAILog.appendLine(`>${message} (${filePath})${logDetail}`);
+    appendToLogFile(workspaceRoot, `${message} (${filePath})${logDetail}`);
+    vscode.window.showWarningMessage(message);
 }
 
 function getDiagramConfig(diagramType) {
@@ -999,66 +1077,75 @@ function filterExcludedDiagramEntries(dsMap, referencedNode, isExcluded) {
     };
 }
 
+async function generatePersistedMermaidDiagram(context, uri, diagramType, graphBuilder) {
+
+    const { createMermaidViewer } = require('./crosswayaiContainer');
+    const { persistMermaid } = createMermaidViewer();
+    const CrossWayAILog = getCrossWayAILog();
+    const config = getDiagramConfig(diagramType);
+    const resolvedContext = resolveDiagramContext(context, uri, diagramType);
+    if (!resolvedContext) {
+        return;
+    }
+
+    const { dsMap, referencedNode, workspaceRoot } = resolvedContext;
+
+    const exclusions = getExclusionsSettings(workspaceRoot);
+    const isExcluded = createExclusionMatcher(exclusions, workspaceRoot);
+    const { dsMap: filteredDsMap, referencedExcluded } = filterExcludedDiagramEntries(dsMap, referencedNode, isExcluded);
+
+    // The diagram's own subject is excluded: do not render it (the start node would
+    // otherwise always be drawn). Inform the user instead of producing a misleading diagram.
+    if (referencedExcluded) {
+        const message = `CrossWayAI: "${referencedNode.FileName}" is excluded (see crosswayai_settings.json) ; diagram was not generated.`;
+        CrossWayAILog.appendLine(`>${message}`);
+        appendToLogFile(workspaceRoot, message);
+        vscode.window.showWarningMessage(message);
+        return;
+    }
+
+    const mermaidGraph = diagramType === 'package'
+        ? graphBuilder(filteredDsMap, referencedNode, workspaceRoot)
+        : graphBuilder(filteredDsMap, referencedNode);
+
+    if (!mermaidGraph) {
+        return;
+    }
+
+    const nodeDetails = buildNodeDatabaseDetails(filteredDsMap);
+    const graphWithNodeDetails = Object.keys(nodeDetails).length > 0
+        ? `%%CROSSWAY_NODE_DETAILS:${JSON.stringify(nodeDetails)}\n${mermaidGraph}`
+        : mermaidGraph;
+    const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, referencedNode);
+    const mermaidRelativeDir = resolveMermaidRelativeDir(referencedNode.FilePath, workspaceRoot, referencedNode);
+    const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, referencedNode.FileName, graphWithMetadata, mermaidRelativeDir);
+
+    return {
+        savedPath,
+        workspaceRoot,
+        referencedNode
+    };
+}
+
 async function generateDiagram(context, uri, diagramType, graphBuilder) {
 
     const { createMermaidViewer } = require('./crosswayaiContainer');
-    const { openCrosswayAIViewer, persistMermaid } = createMermaidViewer();
+    const { openCrosswayAIViewer } = createMermaidViewer();
     const CrossWayAILog = getCrossWayAILog();
-
     let config;
 
     try {
         config = getDiagramConfig(diagramType);
-    } catch (error) {
-        CrossWayAILog.appendLine(`**Error: ${error.message}`);
-        vscode.window.showErrorMessage(error.message);
-        return;
-    }
-
-    try {
-        const resolvedContext = resolveDiagramContext(context, uri);
-        if (!resolvedContext) {
-            return;
-        }
-
-        const { dsMap, referencedNode, workspaceRoot } = resolvedContext;
-
-        const exclusions = getExclusionsSettings(workspaceRoot);
-        const isExcluded = createExclusionMatcher(exclusions, workspaceRoot);
-        const { dsMap: filteredDsMap, referencedExcluded } = filterExcludedDiagramEntries(dsMap, referencedNode, isExcluded);
-
-        // The diagram's own subject is excluded: do not render it (the start node would
-        // otherwise always be drawn). Inform the user instead of producing a misleading diagram.
-        if (referencedExcluded) {
-            const message = `CrossWayAI: "${referencedNode.FileName}" is excluded (see crosswayai_settings.json) ; diagram was not generated.`;
-            CrossWayAILog.appendLine(`>${message}`);
-            appendToLogFile(workspaceRoot, message);
-            vscode.window.showWarningMessage(message);
-            return;
-        }
-
-        const mermaidGraph = diagramType === 'package'
-            ? graphBuilder(filteredDsMap, referencedNode, workspaceRoot)
-            : graphBuilder(filteredDsMap, referencedNode);
-
-        if (!mermaidGraph) {
-            return;
-        }
-
-        const nodeDetails = buildNodeDatabaseDetails(filteredDsMap);
-        const graphWithNodeDetails = Object.keys(nodeDetails).length > 0
-            ? `%%CROSSWAY_NODE_DETAILS:${JSON.stringify(nodeDetails)}\n${mermaidGraph}`
-            : mermaidGraph;
-        const graphWithMetadata = prependSourceMetadata(graphWithNodeDetails, referencedNode);
-        const mermaidRelativeDir = resolveMermaidRelativeDir(referencedNode.FilePath, workspaceRoot, referencedNode);
-        const savedPath = persistMermaid(workspaceRoot, config.persistDiagramType, referencedNode.FileName, graphWithMetadata, mermaidRelativeDir);
+        const result = await generatePersistedMermaidDiagram(context, uri, diagramType, graphBuilder);
+        const savedPath = result && result.savedPath;
         if (savedPath) {
             await openCrosswayAIViewer(context, vscode.Uri.file(savedPath));
             vscode.window.showInformationMessage(`Mermaid diagram saved: ${savedPath}`);
+            return savedPath;
         }
     } catch (error) {
         CrossWayAILog.appendLine(`**Error generating ${diagramType} diagram: ${error.message}`);
-        vscode.window.showErrorMessage(config.errorMessage);
+        vscode.window.showErrorMessage(config ? config.errorMessage : error.message);
     }
 }
 
@@ -1091,6 +1178,7 @@ function getRelativeFolderPath(relPath, projectName, sourceDir) {
 function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
     
     let edgeCounter = 0;
+    const edgeTypesByKey = {};
 
     const NODE_BORDER_COLORS = diagramColors.nodeBorderColors;
     const LINK_COLORS = diagramColors.linkColors;
@@ -1125,6 +1213,10 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
         const ext = node.FileName.includes('.')
             ? node.FileName.split('.').pop().toLowerCase()
             : "";
+
+        if (prefix.startsWith('ENUM')) {
+            return "enum";
+        }
 
         if (prefix.startsWith('CLASS') || ext === 'cls') {
             return "class";
@@ -1226,6 +1318,10 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
             return "property";
         }
 
+        if (linkType === "extends") {
+            return "inherits";
+        }
+
         return linkType;
     }
 
@@ -1281,8 +1377,12 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
 
         const sourceId = getMermaidNodeId(sourceNode);
         const destId = getMermaidNodeId(destNode);
+        const normalizedLinkTypes = getNormalizedLinkTypes(edgeLinkType || label);
+        const relationshipTypes = normalizedLinkTypes.filter(linkType => linkType !== 'circular');
 
         const color = resolveEdgeColor(edgeLinkType || label);
+
+        edgeTypesByKey[`${sourceId}->${destId}`] = relationshipTypes;
 
         let safeLabel = label ? String(label).replace(/"/g, "").trim() : "";
 
@@ -1298,12 +1398,22 @@ function createMermaidGraphWriter(referencedNode, graphType = 'LR') {
     }
 
     function getGraph() {
+        const metadataLines = [];
         const serializedFileMap = JSON.stringify(fileMap);
         const serializedVirtualNodes = JSON.stringify(Array.from(virtualNodes));
         if (serializedFileMap && serializedFileMap !== '{}') {
-            return `%%CROSSWAY_FILE_MAP:${serializedFileMap}\n%%CROSSWAY_VIRTUAL_NODES:${serializedVirtualNodes}\n${mermaidGraph}`;
+            metadataLines.push(`%%CROSSWAY_FILE_MAP:${serializedFileMap}`);
+            metadataLines.push(`%%CROSSWAY_VIRTUAL_NODES:${serializedVirtualNodes}`);
         }
-        return mermaidGraph;
+
+        const serializedEdgeTypes = JSON.stringify(edgeTypesByKey);
+        if (serializedEdgeTypes && serializedEdgeTypes !== '{}') {
+            metadataLines.push(`%%CROSSWAY_EDGE_TYPES:${serializedEdgeTypes}`);
+        }
+
+        return metadataLines.length > 0
+            ? `${metadataLines.join('\n')}\n${mermaidGraph}`
+            : mermaidGraph;
     }
 
     function getFileMap() {
@@ -1321,6 +1431,7 @@ module.exports = {
     resolveDiagramContext,
     createMermaidGraphWriter,
     generateDiagram,
+    generatePersistedMermaidDiagram,
     filterExcludedDiagramEntries,
     runABLScript,
     toMermaidNodeId,

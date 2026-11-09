@@ -34,31 +34,30 @@ async function proparseAllProjects(context) {
 
     CrossWayAILog.appendLine('\n>Proparse All Projects: Starting...');
 
-    // ── 1. Validate Java ───────────────────────────────────────────────────
-    const javaExe = await resolveJavaPath();
-    if (!javaExe) {
-        vscode.window.showErrorMessage(
-            'CrossWayAI: Java not found. Install a JDK and add it to your PATH.'
-        );
-        return;
-    }
-
-    // ── 2. Validate workspace ──────────────────────────────────────────────
+    // ── 1. Validate workspace and Java ─────────────────────────────────────
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
         vscode.window.showErrorMessage('CrossWayAI: No workspace folder found.');
         return;
     }
 
-    // ── 3. Locate the proparse directory ────────────────────────────────
+    const workspaceRoot = resolveWorkspaceRoot(workspaceFolders);
+    const javaExe = await resolveJavaPath(workspaceRoot);
+    if (!javaExe) {
+        vscode.window.showErrorMessage(
+            'CrossWayAI: Java not found. Check JavaHome in .crosswayai/crosswayai_settings.json or add Java to PATH.'
+        );
+        return;
+    }
+
+    // ── 2. Locate the proparse directory ────────────────────────────────
     const proparsePath = path.join(context.extensionPath, 'resources', PROPARSE_DIR);
     if (!fs.existsSync(proparsePath)) {
         vscode.window.showErrorMessage('CrossWayAI: resources/proparse/ directory not found. The extension may be incomplete.');
         return;
     }
 
-    // ── 4. Resolve workspace root and output base ──────────────────────────
-    const workspaceRoot  = resolveWorkspaceRoot(workspaceFolders);
+    // ── 3. Resolve output base ─────────────────────────────────────────────
     const proparseOutBase = path.join(workspaceRoot, '.crosswayai', '.proparse');
 
     // Ensure base output directory exists

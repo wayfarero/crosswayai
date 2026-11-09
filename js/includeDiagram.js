@@ -16,5 +16,6 @@ function generateMermaidIncludeGraph(dsMap, targetNode, graphType = 'TD') {
 }
 
 module.exports = {
-    generateIncludeDiagram
+    generateIncludeDiagram,
+    generateMermaidIncludeGraph
 };

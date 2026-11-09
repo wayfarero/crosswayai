@@ -9,6 +9,7 @@ const { findMethodRange,
 const { getWorkspaceRoot } = require('./workspaceProjects');
 const { generateNodeSummary } = require('./nodeSummary');
 const { getCrossWayAILog } = require('./crosswayaiLogger');
+const { getMultipleViewerInstancesSetting } = require('./crosswayaiSettings');
 const { FILE_TYPES } = require('./extensionConstants');
 
 let mermaidViewerInstance = null;
@@ -24,19 +25,31 @@ function createMermaidViewer() {
     let mermaidServerRoot = null;
     let mermaidServerExtensionRoot = null;
     let mermaidServerPort = null;
-    let mermaidViewerPanel = null;
-    let activeMarkdownRelativePath = null;
-    let activeMarkdownFullPath = null;
-    let markdownFileWatcher = null;
-    let markdownSaveListener = null;
-    let refreshInProgress = false;
+    let multipleViewerInstances = null;
+    let singleViewerState = null;
+    const viewerStates = new Map();
     const viewerViewportStates = new Map();
 
-    function postNodeSummaryResult(message) {
-        if (!mermaidViewerPanel) {
+    function setViewerOpenContext(isOpen) {
+        vscode.commands.executeCommand('setContext', 'crosswayai.viewerOpen', isOpen).then(undefined, (error) => {
+            CrossWayAILog.appendLine(`Failed to update viewer context: ${error.message}`);
+        });
+    }
+
+    function normalizePathIdentity(filePath) {
+        const normalizedPath = path.normalize(filePath);
+        return process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath;
+    }
+
+    function normalizeMarkdownPath(markdownPath) {
+        return normalizePathIdentity(path.resolve(markdownPath));
+    }
+
+    function postNodeSummaryResult(viewerState, message) {
+        if (!viewerState || !viewerState.panel) {
             return Promise.resolve(false);
         }
-        return mermaidViewerPanel.webview.postMessage(message).then(
+        return viewerState.panel.webview.postMessage(message).then(
             () => true,
             () => false
         );
@@ -101,7 +114,7 @@ function createMermaidViewer() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
-        html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #020617; }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #020617; }
         #viewerFrame { border: 0; width: 100vw; height: 100vh; display: block; }
     </style>
 </head>
@@ -110,10 +123,13 @@ function createMermaidViewer() {
     <script>
         const vscodeApi = acquireVsCodeApi();
         const frame = document.getElementById('viewerFrame');
+        let viewerReady = false;
+        const pendingShowInViewerMessages = [];
         function navigate(url) {
             if (typeof url !== 'string' || !url) {
                 return;
             }
+            viewerReady = false;
             frame.src = url;
         }
 
@@ -123,6 +139,22 @@ function createMermaidViewer() {
             const message = event.data || {};
             if (message.type === 'navigate') {
                 navigate(message.url);
+            }
+            if (message.type === 'showFileInViewer') {
+                if (viewerReady) {
+                    frame.contentWindow?.postMessage(message, '*');
+                } else {
+                    pendingShowInViewerMessages.push(message);
+                }
+            }
+            if (message.type === 'viewerReady') {
+                viewerReady = true;
+                pendingShowInViewerMessages.splice(0).forEach((pendingMessage) => {
+                    frame.contentWindow?.postMessage(pendingMessage, '*');
+                });
+            }
+            if (message.type === 'showFileInViewerResult') {
+                vscodeApi.postMessage(message);
             }
             if ( ( message.type === 'openFile'           ||
                    message.type === 'openXrefFile'       ||
@@ -168,29 +200,32 @@ function createMermaidViewer() {
             .join('/');
     }
 
-    function disposeMarkdownWatcher() {
-        if (markdownFileWatcher) {
-            try {
-                markdownFileWatcher.dispose();
-            } catch (_) {
-            }
-            markdownFileWatcher = null;
+    function disposeMarkdownWatcher(viewerState) {
+        if (!viewerState) {
+            return;
         }
 
-        if (markdownSaveListener) {
+        if (viewerState.markdownFileWatcher) {
             try {
-                markdownSaveListener.dispose();
+                viewerState.markdownFileWatcher.dispose();
             } catch (_) {
             }
-            markdownSaveListener = null;
+            viewerState.markdownFileWatcher = null;
         }
 
+        if (viewerState.markdownSaveListener) {
+            try {
+                viewerState.markdownSaveListener.dispose();
+            } catch (_) {
+            }
+            viewerState.markdownSaveListener = null;
+        }
     }
 
     function buildViewerPath(targetMdRelPath) {
         const fileQuery = '/' + toUrlPath(targetMdRelPath).replace(/^\/+/, '');
         const refreshToken = Date.now();
-        const viewportState = viewerViewportStates.get(String(targetMdRelPath || '').toLowerCase()) || null;
+        const viewportState = viewerViewportStates.get(normalizePathIdentity(String(targetMdRelPath || ''))) || null;
         let viewportQuery = '';
 
         if (viewportState) {
@@ -254,52 +289,52 @@ function createMermaidViewer() {
         };
     }
 
-    function queueViewerRefresh() {
-        if (!mermaidViewerPanel || !activeMarkdownRelativePath || !mermaidServerPort || refreshInProgress) {
+    function queueViewerRefresh(viewerState) {
+        if (!viewerState || !viewerState.panel || !viewerState.markdownRelativePath || !mermaidServerPort || viewerState.refreshInProgress) {
             return;
         }
 
-        refreshInProgress = true;
+        viewerState.refreshInProgress = true;
 
         (async () => {
             try {
-                const refreshUrl = await resolveExternalViewerUrl(mermaidServerPort, activeMarkdownRelativePath);
-                await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url: refreshUrl });
-                CrossWayAILog.appendLine(`Mermaid viewer refreshed: ${activeMarkdownRelativePath} \n`);
+                const refreshUrl = await resolveExternalViewerUrl(mermaidServerPort, viewerState.markdownRelativePath);
+                await viewerState.panel.webview.postMessage({ type: 'navigate', url: refreshUrl });
+                CrossWayAILog.appendLine(`Mermaid viewer refreshed: ${viewerState.markdownRelativePath} \n`);
             } catch (error) {
                 CrossWayAILog.appendLine(`Failed to refresh Mermaid viewer: ${error.message}`);
             } finally {
-                refreshInProgress = false;
+                viewerState.refreshInProgress = false;
             }
         })();
     }
 
-    function updateMarkdownWatcher(workspaceRoot, targetMdRelPath) {
-        disposeMarkdownWatcher();
+    function updateMarkdownWatcher(viewerState, workspaceRoot, targetMdRelPath) {
+        disposeMarkdownWatcher(viewerState);
 
-        if (!workspaceRoot || !targetMdRelPath) {
+        if (!viewerState || !workspaceRoot || !targetMdRelPath) {
             return;
         }
 
         const normalizedRelPath = targetMdRelPath.split(path.sep).join('/');
         const filePattern = new vscode.RelativePattern(workspaceRoot, normalizedRelPath);
-        markdownFileWatcher = vscode.workspace.createFileSystemWatcher(filePattern, false, false, false);
+        viewerState.markdownFileWatcher = vscode.workspace.createFileSystemWatcher(filePattern, false, false, false);
 
-        markdownFileWatcher.onDidChange(() => queueViewerRefresh());
-        markdownFileWatcher.onDidCreate(() => queueViewerRefresh());
-        markdownFileWatcher.onDidDelete(() => {
-            if (mermaidViewerPanel) {
-                deactivateMermaidViewer();
+        viewerState.markdownFileWatcher.onDidChange(() => queueViewerRefresh(viewerState));
+        viewerState.markdownFileWatcher.onDidCreate(() => queueViewerRefresh(viewerState));
+        viewerState.markdownFileWatcher.onDidDelete(() => {
+            if (viewerState.panel) {
+                disposeViewerState(viewerState);
             }
         });
 
-        markdownSaveListener = vscode.workspace.onDidSaveTextDocument((document) => {
-            if (!activeMarkdownFullPath || !document || !document.uri || !document.uri.fsPath) {
+        viewerState.markdownSaveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+            if (!viewerState.markdownFullPath || !document || !document.uri || !document.uri.fsPath) {
                 return;
             }
 
-            if (document.uri.fsPath.toLowerCase() === activeMarkdownFullPath.toLowerCase()) {
-                queueViewerRefresh();
+            if (normalizeMarkdownPath(document.uri.fsPath) === viewerState.markdownKey) {
+                queueViewerRefresh(viewerState);
             }
         });
 
@@ -442,14 +477,14 @@ function createMermaidViewer() {
         openTextFile(message.filePath, { failurePrefix: 'file' });
     }
 
-    async function sendNodeSummaryResult(message) {
+    async function sendNodeSummaryResult(viewerState, message) {
         const result = await generateNodeSummary({
             filePath: message.filePath || null,
             nodeId: message.nodeId || null,
             forceRefresh: message.forceRefresh === true
         });
 
-        await postNodeSummaryResult({
+        await postNodeSummaryResult(viewerState, {
             type: 'nodeSummaryResult',
             nodeId: message.nodeId || null,
             filePath: message.filePath || null,
@@ -462,12 +497,12 @@ function createMermaidViewer() {
         });
     }
 
-    function handleNodeSummaryMessage(message) {
+    function handleNodeSummaryMessage(viewerState, message) {
         CrossWayAILog.appendLine(`Node summary requested for node ${message.nodeId || 'unknown'} (${message.filePath || 'no file path'})`);
 
-        sendNodeSummaryResult(message).catch((error) => {
+        sendNodeSummaryResult(viewerState, message).catch((error) => {
             CrossWayAILog.appendLine(`[NodeSummary] unexpected failure: ${error.message}`);
-            postNodeSummaryResult({
+            postNodeSummaryResult(viewerState, {
                 type: 'nodeSummaryResult',
                 nodeId: message.nodeId || null,
                 filePath: message.filePath || null,
@@ -479,13 +514,13 @@ function createMermaidViewer() {
         });
     }
 
-    function handleViewerViewportState(message) {
+    function handleViewerViewportState(viewerState, message) {
         const normalizedViewport = normalizeViewerViewportState(message.viewport);
         if (!normalizedViewport) {
             return;
         }
 
-        const markdownKey = String(activeMarkdownRelativePath || '').toLowerCase();
+        const markdownKey = normalizePathIdentity(String(viewerState && viewerState.markdownRelativePath || ''));
         if (!markdownKey) {
             return;
         }
@@ -493,7 +528,7 @@ function createMermaidViewer() {
         viewerViewportStates.set(markdownKey, normalizedViewport);
     }
 
-    function handleViewerMessage(message, workspaceRoot) {
+    function handleViewerMessage(viewerState, message, workspaceRoot) {
         if (message.type === 'LOG' && message.message) {
             CrossWayAILog.appendLine(String(message.message));
             return;
@@ -517,13 +552,41 @@ function createMermaidViewer() {
         }
 
         if (message.type === 'generateNodeSummary') {
-            handleNodeSummaryMessage(message);
+            handleNodeSummaryMessage(viewerState, message);
             return;
         }
 
         if (message.type === 'viewerViewportState') {
-            handleViewerViewportState(message);
+            handleViewerViewportState(viewerState, message);
+            return;
         }
+
+        if (message.type === 'showFileInViewerResult' && !message.found) {
+            vscode.window.showInformationMessage(
+                `CrossWayAI: ${path.basename(message.filePath || 'The selected file')} is not part of the current diagram.`
+            );
+        }
+    }
+
+    async function showFileInViewer(uri) {
+        if (!uri || !uri.fsPath) {
+            return false;
+        }
+
+        const viewerState = Array.from(viewerStates.values()).find(state => state.panel && state.panel.active)
+            || Array.from(viewerStates.values()).find(state => state.panel && state.panel.visible)
+            || singleViewerState
+            || viewerStates.values().next().value;
+        if (!viewerState || !viewerState.panel) {
+            return false;
+        }
+
+        viewerState.panel.reveal(viewerState.panel.viewColumn);
+        return viewerState.panel.webview.postMessage({
+            type: 'showFileInViewer',
+            filePath: uri.fsPath,
+            caseInsensitive: process.platform === 'win32'
+        });
     }
 
     async function promptForMarkdownTarget(workspaceRoot) {
@@ -707,6 +770,65 @@ function createMermaidViewer() {
         return mermaidServerPort;
     }
 
+    function removeViewerStateMapping(viewerState) {
+        if (viewerState && viewerStates.get(viewerState.markdownKey) === viewerState) {
+            viewerStates.delete(viewerState.markdownKey);
+        }
+    }
+
+    function updateViewerStateTarget(viewerState, markdownRelativePath, markdownFullPath) {
+        removeViewerStateMapping(viewerState);
+        viewerState.markdownRelativePath = markdownRelativePath;
+        viewerState.markdownFullPath = markdownFullPath;
+        viewerState.markdownKey = normalizeMarkdownPath(markdownFullPath);
+        viewerStates.set(viewerState.markdownKey, viewerState);
+    }
+
+    function disposeViewerState(viewerState, disposePanel = true) {
+        if (!viewerState || viewerState.disposed) {
+            return;
+        }
+
+        viewerState.disposed = true;
+        disposeMarkdownWatcher(viewerState);
+        removeViewerStateMapping(viewerState);
+
+        if (singleViewerState === viewerState) {
+            singleViewerState = null;
+        }
+
+        if (viewerStates.size === 0) {
+            multipleViewerInstances = null;
+            setViewerOpenContext(false);
+        }
+
+        const panel = viewerState.panel;
+        viewerState.panel = null;
+        if (disposePanel && panel) {
+            try {
+                panel.dispose();
+            } catch (_) {
+            }
+        }
+    }
+
+    function createViewerState(panel, markdownRelativePath, markdownFullPath) {
+        const viewerState = {
+            panel,
+            markdownRelativePath: null,
+            markdownFullPath: null,
+            markdownKey: null,
+            markdownFileWatcher: null,
+            markdownSaveListener: null,
+            refreshInProgress: false,
+            disposed: false
+        };
+
+        updateViewerStateTarget(viewerState, markdownRelativePath, markdownFullPath);
+        panel.onDidDispose(() => disposeViewerState(viewerState, false));
+        return viewerState;
+    }
+
     async function openCrosswayAIViewer(context, uri) {
         const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot) {
@@ -729,16 +851,23 @@ function createMermaidViewer() {
         }
 
         const targetMdFullPath = path.join(workspaceRoot, targetMdRelPath);
-        activeMarkdownRelativePath = targetMdRelPath;
-        activeMarkdownFullPath = targetMdFullPath;
+        const targetMarkdownKey = normalizeMarkdownPath(targetMdFullPath);
+
+        if (multipleViewerInstances === null) {
+            multipleViewerInstances = getMultipleViewerInstancesSetting(workspaceRoot);
+        }
 
         try {
             const port = await ensureMermaidServer(workspaceRoot, extensionRoot);
             const url = await resolveExternalViewerUrl(port, targetMdRelPath);
 
             const viewerLabel = `CrossWayAI Viewer - ${path.basename(targetMdRelPath)}`;
-            if (!mermaidViewerPanel) {
-                mermaidViewerPanel = vscode.window.createWebviewPanel(
+            let viewerState = multipleViewerInstances
+                ? viewerStates.get(targetMarkdownKey)
+                : singleViewerState;
+
+            if (!viewerState) {
+                const panel = vscode.window.createWebviewPanel(
                     'crosswayaiMermaidViewer',
                     viewerLabel,
                     vscode.ViewColumn.Beside,
@@ -749,28 +878,29 @@ function createMermaidViewer() {
                     }
                 );
 
-                mermaidViewerPanel.onDidDispose(() => {
-                    disposeMarkdownWatcher();
-                    activeMarkdownRelativePath = null;
-                    activeMarkdownFullPath = null;
-                    mermaidViewerPanel = null;
+                viewerState = createViewerState(panel, targetMdRelPath, targetMdFullPath);
+                if (!multipleViewerInstances) {
+                    singleViewerState = viewerState;
+                }
+
+                panel.webview.onDidReceiveMessage((message) => {
+                    handleViewerMessage(viewerState, message, workspaceRoot);
                 });
 
-                mermaidViewerPanel.webview.onDidReceiveMessage((message) => {
-                    handleViewerMessage(message, workspaceRoot);
-                });
-
-                mermaidViewerPanel.webview.html = getMermaidViewerHostHtml(url);
-                await lockActiveViewerGroup();
+                panel.webview.html = getMermaidViewerHostHtml(url);
+                setViewerOpenContext(true);
+                if (!multipleViewerInstances) {
+                    await lockActiveViewerGroup();
+                }
             } else {
-                // Always update the tab label to reflect the current file
-                mermaidViewerPanel.title = viewerLabel;
+                updateViewerStateTarget(viewerState, targetMdRelPath, targetMdFullPath);
+                viewerState.panel.title = viewerLabel;
                 // Preserve editor focus during auto-refresh to avoid replacing the viewer tab on next Explorer click.
-                mermaidViewerPanel.reveal(vscode.ViewColumn.Beside, true);
-                await mermaidViewerPanel.webview.postMessage({ type: 'navigate', url });
+                viewerState.panel.reveal(vscode.ViewColumn.Beside, true);
+                await viewerState.panel.webview.postMessage({ type: 'navigate', url });
             }
 
-            updateMarkdownWatcher(workspaceRoot, targetMdRelPath);
+            updateMarkdownWatcher(viewerState, workspaceRoot, targetMdRelPath);
 
             if (!fs.existsSync(targetMdFullPath)) {
                 vscode.window.showInformationMessage(`CrossWayAI: Viewer opened. Target markdown not found: ${targetMdRelPath}`);
@@ -782,17 +912,10 @@ function createMermaidViewer() {
     }
 
     function deactivateMermaidViewer() {
-        disposeMarkdownWatcher();
-        activeMarkdownRelativePath = null;
-        activeMarkdownFullPath = null;
-
-        if (mermaidViewerPanel) {
-            try {
-                mermaidViewerPanel.dispose();
-            } catch (_) {
-            }
-            mermaidViewerPanel = null;
-        }
+        Array.from(viewerStates.values()).forEach(viewerState => disposeViewerState(viewerState));
+        viewerStates.clear();
+        singleViewerState = null;
+        setViewerOpenContext(false);
 
         if (mermaidServer) {
             try {
@@ -801,54 +924,66 @@ function createMermaidViewer() {
             }
             mermaidServer = null;
             mermaidServerRoot = null;
+            mermaidServerExtensionRoot = null;
             mermaidServerPort = null;
         }
 
+        multipleViewerInstances = null;
+        viewerViewportStates.clear();
         mermaidViewerInstance = null;
     }
 
+    /**
+     * @returns {boolean} True when the viewer was showing one of the removed diagrams
+     *          and has been closed.
+     */
     function closeMermaidViewerForFile(workspaceRoot, removedMarkdownPaths) {
-        if (!mermaidViewerPanel || !activeMarkdownRelativePath || !workspaceRoot) {
-            return;
+        if (viewerStates.size === 0 || !workspaceRoot) {
+            return false;
         }
 
-        const activeFullPath = path.join(workspaceRoot, activeMarkdownRelativePath);
-        const normalizedActivePath = path.normalize(activeFullPath).toLowerCase();
-        const removedPaths = Array.isArray(removedMarkdownPaths)
-            ? removedMarkdownPaths.filter(Boolean)
-            : [];
+        const removedPathKeys = new Set(
+            (Array.isArray(removedMarkdownPaths) ? removedMarkdownPaths : [])
+                .filter(removedPath => typeof removedPath === 'string' && removedPath)
+                .map(normalizeMarkdownPath)
+        );
+        let closedViewer = false;
 
-        const shouldClose = removedPaths.some(removedPath => {
-            if (typeof removedPath !== 'string' || !removedPath) {
-                return false;
+        Array.from(viewerStates.values()).forEach(viewerState => {
+            if (removedPathKeys.has(viewerState.markdownKey)) {
+                disposeViewerState(viewerState);
+                closedViewer = true;
             }
-
-            const normalizedRemovedPath = path.normalize(removedPath).toLowerCase();
-            return normalizedRemovedPath === normalizedActivePath;
         });
 
-        if (!shouldClose) {
-            return;
+        return closedViewer;
+    }
+
+    function isMermaidViewerOpen(markdownPath) {
+        if (!markdownPath) {
+            return viewerStates.size > 0;
         }
 
-        deactivateMermaidViewer();
+        return viewerStates.has(normalizeMarkdownPath(markdownPath));
     }
 
-    function isMermaidViewerOpen() {
-        return Boolean(mermaidViewerPanel);
+    function isMermaidViewerVisible(markdownPath) {
+        return isMermaidViewerOpen(markdownPath);
     }
 
-    function isMermaidViewerVisible() {
-        return Boolean(mermaidViewerPanel);
+    function usesMultipleViewerInstances() {
+        return multipleViewerInstances === true;
     }
 
     mermaidViewerInstance = {
         openCrosswayAIViewer,
+        showFileInViewer,
         deactivateMermaidViewer,
         closeMermaidViewerForFile,
         persistMermaid,
         isMermaidViewerOpen,
-        isMermaidViewerVisible
+        isMermaidViewerVisible,
+        usesMultipleViewerInstances
     };
 
     return mermaidViewerInstance;
